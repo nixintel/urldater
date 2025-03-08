@@ -1,0 +1,610 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Web Media Analyzer</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/datatables@1.10.18/media/css/jquery.dataTables.min.css" rel="stylesheet">
+    <script src="https://unpkg.com/vis-timeline@latest/standalone/umd/vis-timeline-graph2d.min.js"></script>
+    <link href="https://unpkg.com/vis-timeline@latest/styles/vis-timeline-graph2d.min.css" rel="stylesheet" type="text/css" />
+    <style>
+        body { padding: 20px; }
+        .table { margin-top: 20px; }
+        #results { margin-top: 30px; }
+        
+        /* Spinner styles */
+        .spinner-container {
+            display: none;
+            margin: 20px 0;
+            text-align: center;
+        }
+        .spinner-text {
+            margin-top: 10px;
+            font-style: italic;
+            color: #666;
+        }
+        .sort-button {
+            background: none;
+            border: none;
+            padding: 0 5px;
+            cursor: pointer;
+        }
+        .filter-controls {
+            margin-bottom: 15px;
+        }
+        .table-controls {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        #timeline {
+            display: none;
+            margin: 20px 0;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        #visualization {
+            height: 300px;
+        }
+        .domain-event {
+            background-color: #007bff !important;
+            color: white !important;
+            border-color: #0056b3 !important;
+            font-weight: bold;
+        }
+        .header-event {
+            background-color: #28a745 !important;
+            color: white !important;
+            border-color: #1e7e34 !important;
+        }
+        .vis-item.vis-selected {
+            background-color: #17a2b8 !important;
+            border-color: #138496 !important;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Web Media Analyzer</h1>
+        <form id="searchForm">
+            <div class="form-group">
+                <label for="url">URL:</label>
+                <input type="text" class="form-control" id="url" name="url" required>
+            </div>
+            
+            <div class="form-group">
+                <div class="form-check">
+                    <input class="form-check-input" type="radio" name="searchType" id="rdapOnly" value="rdap" checked>
+                    <label class="form-check-label" for="rdapOnly">
+                        Domain History Only
+                    </label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input" type="radio" name="searchType" id="headersOnly" value="headers">
+                    <label class="form-check-label" for="headersOnly">
+                        HTTP Headers Only
+                    </label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input" type="radio" name="searchType" id="certsOnly" value="certs">
+                    <label class="form-check-label" for="certsOnly">
+                        Certificate History Only
+                    </label>
+                </div>
+            </div>
+
+            <button type="submit" class="btn btn-primary">Analyze</button>
+        </form>
+
+        <!-- Loading Spinner -->
+        <div id="spinner" class="spinner-container">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            <div class="spinner-text">Analyzing URL... This may take a few moments.</div>
+        </div>
+
+        <div id="results" style="display: none;">
+            <div id="domain-info" class="mt-4">
+                <h3>Domain Information</h3>
+                <div class="table-controls">
+                    <button class="btn btn-secondary" onclick="exportTable('rdap')">Export RDAP Data</button>
+                    <button class="btn btn-outline-secondary" onclick="toggleDomainSort()">
+                        <span id="domain-sort-icon">↑</span> Toggle Sort Order
+                    </button>
+                </div>
+                <table class="table table-striped">
+                    <thead>
+                        <tr>
+                            <th>Type</th>
+                            <th>URL</th>
+                            <th>Time</th>
+                        </tr>
+                    </thead>
+                    <tbody id="domain-results">
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Certificate table with exactly four columns as specified -->
+            <div id="ssl-certificate" class="mt-4">
+                <h3>SSL Certificate Information</h3>
+                <table class="table table-striped">
+                    <thead>
+                        <tr>
+                            <th>Type</th>
+                            <th>Common Name</th>
+                            <th>Logged At</th>
+                            <th>Certificate</th>
+                        </tr>
+                    </thead>
+                    <tbody id="ssl-certificate-results">
+                    </tbody>
+                </table>
+            </div>
+
+            <div id="headers-info" class="mt-4">
+                <h3>Last Modified Headers</h3>
+                <div class="table-controls">
+                    <div>
+                        <button class="btn btn-secondary" onclick="exportTable('headers')">Export Headers Data</button>
+                        <select id="type-filter" class="form-select d-inline-block w-auto ms-2" onchange="filterHeadersResults()">
+                            <option value="all">All Types</option>
+                            <option value="favicon">Favicon</option>
+                            <option value="image">Image</option>
+                        </select>
+                    </div>
+                    <button class="btn btn-outline-secondary" onclick="toggleHeadersSort()">
+                        <span id="headers-sort-icon">↑</span> Toggle Sort Order
+                    </button>
+                </div>
+                <table class="table table-striped">
+                    <thead>
+                        <tr>
+                            <th>Type</th>
+                            <th>URL</th>
+                            <th>Last Modified</th>
+                        </tr>
+                    </thead>
+                    <tbody id="headers-results">
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="mt-4">
+                <button class="btn btn-primary" onclick="exportAll()">Export All Data</button>
+            </div>
+
+            <!-- Move timeline button inside results div and hide by default -->
+            <div class="mt-4" id="timelineButtonContainer" style="display: none;">
+                <button class="btn btn-primary" id="viewTimelineBtn" onclick="window.showTimeline()">View Timeline</button>
+            </div>
+        </div>
+
+        <!-- First, make sure the timeline container is properly structured -->
+        <div id="timeline" style="display: none;">
+            <h3>Timeline Visualization</h3>
+            <div class="mb-3">
+                <span class="badge bg-primary me-2">Domain Events</span>
+                <span class="badge bg-success">Media Events</span>
+            </div>
+            <div id="visualization"></div>
+        </div>
+
+        <div id="error" class="alert alert-danger d-none"></div>
+    </div>
+
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.datatables.net/1.10.24/js/jquery.dataTables.min.js"></script>
+    <script>
+    document.addEventListener('DOMContentLoaded', function() {
+        console.log('Page loaded');
+        
+        const form = document.getElementById('searchForm');
+        const domainAgeCheckbox = document.getElementById('domain_age_only');
+        const headersCheckbox = document.getElementById('headers_only');
+        const spinner = document.getElementById('spinner');
+        const results = document.getElementById('results');
+
+        // Initialize global variables
+        window.domainResults = [];
+        window.certResults = [];
+        window.headerResults = [];
+        window.domainSortAsc = true;
+        window.headersSortAsc = true;
+        window.headersPagination = { currentPage: 1, perPage: 10 };
+        window.currentTimeline = null;
+        window.certSortAsc = true;
+
+        // Mutual exclusivity for checkboxes
+        domainAgeCheckbox.addEventListener('change', function() {
+            if (this.checked) {
+                headersCheckbox.checked = false;
+            }
+        });
+
+        headersCheckbox.addEventListener('change', function() {
+            if (this.checked) {
+                domainAgeCheckbox.checked = false;
+            }
+        });
+
+        // Define timeline functions in global scope
+        window.clearTimeline = function() {
+            console.log('Clearing timeline');
+            const timelineDiv = document.getElementById('timeline');
+            const visualizationDiv = document.getElementById('visualization');
+            
+            if (window.currentTimeline) {
+                window.currentTimeline.destroy();
+                window.currentTimeline = null;
+            }
+            
+            visualizationDiv.innerHTML = '';
+            timelineDiv.style.display = 'none';
+        };
+
+        window.showTimeline = function() {
+            console.log('Showing timeline');
+            window.clearTimeline();
+            
+            const timelineDiv = document.getElementById('timeline');
+            const visualizationDiv = document.getElementById('visualization');
+            
+            const timelineItems = [
+                ...window.domainResults.map(item => ({
+                    id: crypto.randomUUID(),
+                    content: `${item.type} (Domain)`,
+                    title: `${item.type}<br>URL: ${item.url}<br>Time: ${item.last_modified}`,
+                    start: parseDate(item.last_modified),
+                    className: 'domain-event'
+                })),
+                ...window.headerResults.map(item => ({
+                    id: crypto.randomUUID(),
+                    content: `${item.type}`,
+                    title: `${item.type}<br>URL: ${item.url}<br>Time: ${item.last_modified}`,
+                    start: parseDate(item.last_modified),
+                    className: 'header-event'
+                }))
+            ];
+
+            console.log('Timeline items:', timelineItems);
+
+            if (timelineItems.length === 0) {
+                console.log('No items to display');
+                return;
+            }
+
+            timelineDiv.style.display = 'block';
+
+            const options = {
+                height: '300px',
+                min: new Date(Math.min(...timelineItems.map(r => r.start))),
+                max: new Date(Math.max(...timelineItems.map(r => r.start))),
+                showCurrentTime: false,
+                tooltip: {
+                    followMouse: true,
+                    overflowMethod: 'cap'
+                },
+                margin: {
+                    item: 20,
+                    axis: 40
+                },
+                orientation: 'top',
+                zoomMin: 1000 * 60 * 60 * 24,
+                zoomMax: 1000 * 60 * 60 * 24 * 365 * 10,
+                width: '100%',
+                maxHeight: '300px'
+            };
+
+            try {
+                console.log('Creating new timeline');
+                window.currentTimeline = new vis.Timeline(
+                    visualizationDiv,
+                    new vis.DataSet(timelineItems),
+                    options
+                );
+
+                window.addEventListener('resize', () => {
+                    if (window.currentTimeline) {
+                        window.currentTimeline.redraw();
+                    }
+                });
+
+                timelineDiv.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                console.log('Timeline created successfully');
+            } catch (error) {
+                console.error('Error creating timeline:', error);
+            }
+        };
+
+        // Form submission handler
+        form.addEventListener('submit', async function(event) {
+            event.preventDefault();
+            
+            const url = document.getElementById('url').value;
+            const searchType = document.querySelector('input[name="searchType"]:checked').value;
+            
+            // Set flags based on search type
+            const requestData = {
+                url: url,
+                domain_age_only: false,
+                headers_only: false
+            };
+
+            if (searchType === 'rdap') {
+                requestData.domain_age_only = true;
+            } else if (searchType === 'headers') {
+                requestData.headers_only = true;
+            } else if (searchType === 'certs') {
+                requestData.certs_only = true;
+            }
+
+            try {
+                const response = await fetch('/analyze', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(requestData)
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const data = await response.json();
+                
+                // Clear all previous results
+                document.getElementById('domain-results').innerHTML = '';
+                document.getElementById('headers-results').innerHTML = '';
+                document.getElementById('ssl-certificate-results').innerHTML = '';
+                
+                // Hide all result sections initially
+                document.getElementById('domain-info').style.display = 'none';
+                document.getElementById('headers-info').style.display = 'none';
+                document.getElementById('ssl-certificate').style.display = 'none';
+                
+                // Show results based on search type
+                if (searchType === 'rdap' && data) {
+                    document.getElementById('domain-info').style.display = 'block';
+                    displayDomainResults(data);
+                } else if (searchType === 'headers' && data) {
+                    document.getElementById('headers-info').style.display = 'block';
+                    displayHeadersResults(data);
+                } else if (searchType === 'certs' && data) {
+                    document.getElementById('ssl-certificate').style.display = 'block';
+                    displayCertificateResults(data);
+                }
+                
+                document.getElementById('results').style.display = 'block';
+                
+            } catch (error) {
+                console.error('Error:', error);
+                alert('An error occurred while fetching the results.');
+            }
+        });
+    });
+
+    function displayDomainResults(data) {
+        const tbody = document.getElementById('domain-results');
+        tbody.innerHTML = '';
+        
+        if (!data || !data.length) return;
+
+        const sortedResults = [...data].sort((a, b) => {
+            const [dateA, timeA] = a.last_modified.split(' ');
+            const [dateB, timeB] = b.last_modified.split(' ');
+            const [dayA, monthA, yearA] = dateA.split('-');
+            const [dayB, monthB, yearB] = dateB.split('-');
+            const dateObjA = new Date(`${yearA}-${monthA}-${dayA} ${timeA}`);
+            const dateObjB = new Date(`${yearB}-${monthB}-${dayB} ${timeB}`);
+            return window.domainSortAsc ? dateObjA - dateObjB : dateObjB - dateObjA;
+        });
+
+        // Display all results without pagination
+        sortedResults.forEach(item => {
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td>${item.type}</td>
+                <td><a href="${item.url}" target="_blank">${item.url}</a></td>
+                <td>${item.last_modified}</td>
+            `;
+            tbody.appendChild(row);
+        });
+    }
+
+    function displayHeadersResults(data) {
+        const tbody = document.getElementById('headers-results');
+        const filterValue = document.getElementById('type-filter').value;
+        tbody.innerHTML = '';
+        
+        if (!data || !data.length) return;
+
+        let filteredResults = [...data];
+        if (filterValue !== 'all') {
+            filteredResults = filteredResults.filter(item => 
+                item.type.toLowerCase() === filterValue.toLowerCase()
+            );
+        }
+
+        // Parse dates once for efficiency
+        const sortedResults = filteredResults.sort((a, b) => {
+            // Parse the date strings in the format "DD-MM-YYYY HH:mm:ss UTC"
+            const [dateA, timeA] = a.last_modified.split(' ');
+            const [dateB, timeB] = b.last_modified.split(' ');
+            
+            const [dayA, monthA, yearA] = dateA.split('-');
+            const [dayB, monthB, yearB] = dateB.split('-');
+            
+            const dateObjA = new Date(`${yearA}-${monthA}-${dayA} ${timeA}`);
+            const dateObjB = new Date(`${yearB}-${monthB}-${dayB} ${timeB}`);
+            
+            // Sort ascending (oldest first) by default
+            return window.headersSortAsc ? dateObjA - dateObjB : dateObjB - dateObjA;
+        });
+
+        sortedResults.forEach(item => {
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td>${item.type}</td>
+                <td><a href="${item.url}" target="_blank">${item.url}</a></td>
+                <td>${item.last_modified}</td>
+            `;
+            tbody.appendChild(row);
+        });
+    }
+
+    function displayCertificateResults(data) {
+        const tbody = document.getElementById('ssl-certificate-results');
+        tbody.innerHTML = '';
+        
+        if (!data || !data.length) return;
+
+        data.forEach(item => {
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td>${item.type}</td>
+                <td>${item.common_name}</td>
+                <td>${item.logged_at}</td>
+                <td><a href="${item.certificate_url}" target="_blank">View Certificate</a></td>
+            `;
+            tbody.appendChild(row);
+        });
+    }
+
+    function toggleDomainSort() {
+        window.domainSortAsc = !window.domainSortAsc;
+        document.getElementById('domain-sort-icon').textContent = window.domainSortAsc ? '↑' : '↓';
+        displayDomainResults();
+    }
+
+    function toggleHeadersSort() {
+        window.headersSortAsc = !window.headersSortAsc;
+        document.getElementById('headers-sort-icon').textContent = window.headersSortAsc ? '↑' : '↓';
+        displayHeadersResults();
+    }
+
+    function filterHeadersResults() {
+        displayHeadersResults();
+    }
+
+    // Add export functions
+    async function exportTable(type) {
+        const domain = document.body.dataset.currentDomain;
+        const tableData = type === 'rdap' ? 
+            Array.from(document.getElementById('domain-results').children).map(row => ({
+                type: row.children[0].textContent,
+                url: row.children[1].firstChild.href,
+                last_modified: row.children[2].textContent
+            })) :
+            type === 'certs' ?
+            Array.from(document.getElementById('cert-results').children).map(row => ({
+                type: row.children[0].textContent,
+                url: row.children[1].firstChild.href,
+                last_modified: row.children[2].textContent
+            })) :
+            Array.from(document.getElementById('headers-results').children).map(row => ({
+                type: row.children[0].textContent,
+                url: row.children[1].firstChild.href,
+                last_modified: row.children[2].textContent
+            }));
+
+        try {
+            const response = await fetch(`/export/${type}`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    domain: domain,
+                    table_data: tableData
+                })
+            });
+            
+            if (!response.ok) throw new Error('Export failed');
+            
+            const blob = await response.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = '';  // Let the server decide the filename
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+        } catch (error) {
+            console.error('Export error:', error);
+            alert('Error exporting data');
+        }
+    }
+
+    async function exportAll() {
+        const domain = document.body.dataset.currentDomain;
+        const searchType = document.querySelector('input[name="searchType"]:checked').value;
+        
+        let data = [];
+        
+        if (searchType === 'rdap') {
+            data = Array.from(document.getElementById('domain-results').children).map(row => ({
+                type: row.children[0].textContent,
+                url: row.children[1].firstChild.href,
+                last_modified: row.children[2].textContent
+            }));
+        } else if (searchType === 'headers') {
+            data = Array.from(document.getElementById('headers-results').children).map(row => ({
+                type: row.children[0].textContent,
+                url: row.children[1].firstChild.href,
+                last_modified: row.children[2].textContent
+            }));
+        } else if (searchType === 'certs') {
+            data = Array.from(document.getElementById('ssl-certificate-results').children).map(row => ({
+                type: row.children[0].textContent,
+                common_name: row.children[1].textContent,
+                logged_at: row.children[2].textContent,
+                certificate_url: row.children[3].firstChild.href
+            }));
+        }
+
+        try {
+            const response = await fetch('/export/all', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    domain: domain,
+                    rdap_data: data
+                })
+            });
+            
+            if (!response.ok) throw new Error('Export failed');
+            
+            const blob = await response.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = '';  // Let the server decide the filename
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+        } catch (error) {
+            console.error('Export error:', error);
+            alert('Error exporting data');
+        }
+    }
+
+    // Keep parseDate function in global scope
+    function parseDate(dateStr) {
+        const [date, time, tz] = dateStr.split(' ');
+        const [day, month, year] = date.split('-');
+        return new Date(`${year}-${month}-${day} ${time} ${tz}`);
+    }
+    </script>
+</body>
+</html> 
