@@ -21,20 +21,34 @@ def get_domain_info(url):
         logging.info(f"Looking up RDAP info for domain: {domain}")
         
         # Run the rdap command with improved output capture
-        result = subprocess.run(
-            ['rdap', '--json', domain],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            check=True
-        )
+        try:
+            result = subprocess.run(
+                ['rdap', '--json', domain],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                check=True
+            )
+        except subprocess.CalledProcessError as e:
+            logging.error(f"RDAP lookup failed: {e.output}")
+            return [{
+                'type': 'Error',
+                'url': f"https://rdap.org/domain/{domain}",
+                'last_modified': 'N/A',
+                'error': 'No RDAP data could be found for this domain. Check this TLD supports RDAP queries.'
+            }]
         
         # Log the raw output for debugging
         logging.debug(f"Raw RDAP output: {result.stdout}")
         
         if not result.stdout.strip():
             logging.error("OpenRDAP returned empty output")
-            return []
+            return [{
+                'type': 'Error',
+                'url': f"https://rdap.org/domain/{domain}",
+                'last_modified': 'N/A',
+                'error': 'No RDAP data could be found for this domain. Check this TLD supports RDAP queries.'
+            }]
         
         try:
             # Split the output on the known headers

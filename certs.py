@@ -29,69 +29,106 @@ def extract_main_domain(url):
     return '.'.join(domain_parts[-2:])
 
 def parse_certificate_data(html_content):
-    logger.debug("Starting to parse certificate data")
+    """Parse the HTML content from crt.sh and extract certificate information."""
+    logging.debug("Starting to parse certificate data")
     
     if not html_content:
-        logger.warning("Received empty HTML content")
+        logging.warning("Received empty HTML content")
         return None
         
-    soup = BeautifulSoup(html_content, 'html.parser')
-    logger.debug("Created BeautifulSoup object")
-    
-    # Find the main table containing certificate data (it's nested inside another table)
-    outer_table = soup.find('table')
-    if not outer_table:
-        logger.warning("No outer table found")
-        return None
-        
-    # Get the nested table that contains the certificate rows
-    inner_table = outer_table.find('td', class_='outer').find('table')
-    if not inner_table:
-        logger.warning("No inner table found")
-        return None
-    
-    # Get all rows except the header row
-    rows = inner_table.find_all('tr')[1:]  # Skip header row
-    logger.debug(f"Found {len(rows)} certificate rows")
-    
-    if not rows:
-        logger.warning("No certificate rows found")
-        return None
-    
-    # Get the last row (most recent certificate)
-    last_row = rows[0]  # First row is the most recent since they're sorted by date
-    cells = last_row.find_all('td')
-    logger.debug(f"Processing last row with {len(cells)} cells")
-    
     try:
-        cert_id = cells[0].find('a').text.strip()
-        logged_at = cells[1].text.strip()
-        common_name = cells[4].text.strip()  # Common Name is in the 5th column
+        soup = BeautifulSoup(html_content, 'html.parser')
+        logging.debug("Created BeautifulSoup object")
         
-        logger.debug(f"Extracted raw data - ID: {cert_id}, Date: {logged_at}, CN: {common_name}")
+        # Find all tables
+        tables = soup.find_all('table')
+        logging.debug(f"Found {len(tables)} tables")
         
-        # Convert date from YYYY-MM-DD to DD-MM-YYYY
+        # The certificate data is typically in the table with the most rows
+        cert_table = None
+        max_rows = 0
+        
+        for i, table in enumerate(tables):
+            rows = table.find_all('tr')
+            logging.debug(f"Table {i} has {len(rows)} rows")
+            if len(rows) > max_rows:
+                max_rows = len(rows)
+                cert_table = table
+        
+        if not cert_table:
+            logging.warning("No tables found with rows")
+            return None
+            
+        rows = cert_table.find_all('tr')
+        logging.debug(f"Using table with {len(rows)} rows")
+        
+        if len(rows) < 2:  # Need at least header row and one data row
+            logging.warning("No certificate rows found")
+            return None
+        
+        # Get the last row (most recent certificate)
+        data_row = rows[-1]  # Get the last row
+        cells = data_row.find_all(['td', 'th'])
+        
+        logging.debug(f"Processing last row with {len(cells)} cells")
+        logging.debug(f"Cell contents: {[cell.text.strip() for cell in cells]}")
+        
+        if len(cells) < 6:  # crt.sh typically has at least 6 columns
+            logging.warning(f"Unexpected number of cells: {len(cells)}")
+            return None
+            
         try:
-            date_obj = datetime.strptime(logged_at, '%Y-%m-%d')
-            formatted_date = date_obj.strftime('%d-%m-%Y')
-            logger.debug(f"Successfully formatted date from {logged_at} to {formatted_date}")
-        except ValueError as e:
-            logger.warning(f"Date parsing failed: {e}. Using original date format: {logged_at}")
-            formatted_date = logged_at
-        
-        cert_data = {
-            'type': 'First SSL Certificate',
-            'common_name': common_name,
-            'logged_at': formatted_date,
-            'id': cert_id
-        }
-        
-        logger.info(f"Successfully created certificate data: {cert_data}")
-        return cert_data
-        
+            # Extract the certificate ID and create source URL
+            cert_id = None
+            id_link = cells[0].find('a')
+            if id_link and 'href' in id_link.attrs:
+                # Extract ID from href that looks like "?id=1234"
+                href = id_link['href']
+                cert_id = href.split('=')[-1] if '=' in href else None
+            
+            if not cert_id:
+                cert_id = cells[0].text.strip()
+            
+            source_url = f"https://crt.sh/?id={cert_id}"
+            
+            # Get other certificate details
+            logged_at = cells[1].text.strip()
+            not_before = cells[2].text.strip()
+            common_name = cells[4].text.strip()
+            
+            # Convert date format if needed
+            try:
+                logged_date = datetime.strptime(logged_at, '%Y-%m-%d')
+                logged_at = logged_date.strftime('%d-%m-%Y')
+            except ValueError:
+                logging.warning(f"Could not parse date format: {logged_at}")
+                # Keep original format if parsing fails
+            
+            try:
+                valid_from = datetime.strptime(not_before, '%Y-%m-%d')
+                not_before = valid_from.strftime('%d-%m-%Y')
+            except ValueError:
+                logging.warning(f"Could not parse date format: {not_before}")
+                # Keep original format if parsing fails
+            
+            cert_data = {
+                'type': 'SSL Certificate',
+                'Common Name': common_name,
+                'First Seen': logged_at,
+                'Valid From': not_before,
+                'Source': source_url
+            }
+            
+            logging.info(f"Successfully parsed certificate data: {cert_data}")
+            return cert_data
+            
+        except Exception as e:
+            logging.error(f"Error extracting cell data: {str(e)}")
+            logging.error(f"Row content: {data_row}")
+            return None
+            
     except Exception as e:
-        logger.error(f"Error processing certificate data: {str(e)}")
-        logger.error(f"Row content: {last_row}")
+        logging.error(f"Error parsing certificate data: {str(e)}")
         return None
 
 def get_first_certificate(domain):
@@ -99,74 +136,90 @@ def get_first_certificate(domain):
     Connect to crt.sh and attempt to retrieve certificate information.
     Returns tuple of (success, result), where result is either the data or error message.
     """
+    logging.debug(f"Starting certificate search for domain: {domain}")
+    
     chrome_options = Options()
-    chrome_options.add_argument('--headless=new')  # Updated headless mode syntax
+    chrome_options.add_argument('--headless=new')
     chrome_options.add_argument('--no-sandbox')
     chrome_options.add_argument('--disable-dev-shm-usage')
-    chrome_options.add_argument('--disable-gpu')  # Required for some Linux systems
-    chrome_options.add_argument('--remote-debugging-port=9222')  # Add debugging port
-    chrome_options.add_argument('--window-size=1920,1080')  # Set window size
+    chrome_options.add_argument('--disable-gpu')
+    chrome_options.add_argument('--window-size=1920,1080')
+    
+    # Add more detailed logging
+    logging.debug("Chrome options configured")
     
     max_retries = 3
-    timeout = 5
+    timeout = 30  # Increased timeout to 30 seconds
     
-    service = Service()  # Initialize Chrome service
-    
-    for attempt in range(max_retries):
-        driver = None
-        try:
-            driver = webdriver.Chrome(service=service, options=chrome_options)
-            driver.set_page_load_timeout(timeout)
-            
-            url = f"https://crt.sh/?q={domain}"
-            driver.get(url)
-            
-            # Check HTTP status code
-            status_code = driver.execute_script("return window.performance.getEntries()[0].responseStatus") or 200
-            logging.debug(f"crt.sh response status: {status_code}")
-            
-            # If we get a 4xx or 5xx status code, stop retrying
-            if str(status_code).startswith(('4', '5')):
-                return False, f"Server error: HTTP {status_code}"
-            
-            # Wait for the table to load
-            WebDriverWait(driver, timeout).until(
-                EC.presence_of_element_located((By.TAG_NAME, "table"))
-            )
-            
-            # Get the page source and parse it
-            html_content = driver.page_source
-            cert_data = parse_certificate_data(html_content)
-            
-            if cert_data:
-                logging.info(f"Successfully retrieved certificate data for {domain}")
-                return True, cert_data
-            else:
-                return False, "No certificate data found"
-            
-        except TimeoutException:
-            error_msg = f"Timeout error on attempt {attempt + 1}/{max_retries}"
-            logging.warning(f"crt.sh timeout for {domain}: {error_msg}")
-            if attempt == max_retries - 1:
-                return False, error_msg
-            time.sleep(2)
-            
-        except WebDriverException as e:
-            error_msg = f"Browser error: {str(e)}"
-            logging.error(f"crt.sh browser error for {domain}: {error_msg}")
-            # Don't retry on browser initialization errors
-            if "DevToolsActivePort" in str(e) or "session not created" in str(e):
-                return False, "Chrome browser initialization failed. Please check Chrome installation."
-            if attempt == max_retries - 1:
-                return False, error_msg
-            time.sleep(2)
-            
-        finally:
-            if driver:
+    try:
+        service = Service()
+        logging.debug("Chrome service initialized")
+        
+        for attempt in range(max_retries):
+            driver = None
+            try:
+                logging.debug(f"Attempt {attempt + 1}/{max_retries} to get certificate data")
+                driver = webdriver.Chrome(service=service, options=chrome_options)
+                driver.set_page_load_timeout(timeout)
+                
+                url = f"https://crt.sh/?q={domain}"
+                logging.debug(f"Accessing URL: {url}")
+                driver.get(url)
+                
+                # Wait for the table to load with a more specific selector
+                logging.debug("Waiting for table to load...")
                 try:
-                    driver.quit()
-                except Exception as e:
-                    logging.warning(f"Error closing browser: {str(e)}")
+                    # Wait for a table with multiple rows (typical for certificate data)
+                    WebDriverWait(driver, timeout).until(
+                        lambda d: len(d.find_elements(By.TAG_NAME, "tr")) > 1
+                    )
+                    logging.debug("Table loaded successfully")
+                except TimeoutException:
+                    logging.warning("Timeout waiting for table rows")
+                    raise
+                
+                # Get the page source and parse it
+                html_content = driver.page_source
+                logging.debug("Got page source, parsing certificate data...")
+                cert_data = parse_certificate_data(html_content)
+                
+                if cert_data:
+                    logging.info(f"Successfully retrieved certificate data for {domain}")
+                    return True, cert_data
+                else:
+                    error_msg = "No certificate data found in the response"
+                    logging.warning(f"Certificate data not found for {domain}: {error_msg}")
+                    if attempt == max_retries - 1:
+                        return False, error_msg
+                    time.sleep(2)
+                
+            except TimeoutException as e:
+                error_msg = f"Timeout error on attempt {attempt + 1}/{max_retries}: {str(e)}"
+                logging.warning(f"crt.sh timeout for {domain}: {error_msg}")
+                if attempt == max_retries - 1:
+                    return False, error_msg
+                time.sleep(2)
+                
+            except WebDriverException as e:
+                error_msg = f"Browser error: {str(e)}"
+                logging.error(f"crt.sh browser error for {domain}: {error_msg}")
+                if "chromedriver" in str(e).lower():
+                    return False, "ChromeDriver error: Please ensure Chrome and ChromeDriver are properly installed"
+                if attempt == max_retries - 1:
+                    return False, error_msg
+                time.sleep(2)
+                
+            finally:
+                if driver:
+                    try:
+                        driver.quit()
+                    except Exception as e:
+                        logging.warning(f"Error closing browser: {str(e)}")
+    
+    except Exception as e:
+        error_msg = f"Unexpected error: {str(e)}"
+        logging.error(f"Unexpected error getting certificate data: {error_msg}")
+        return False, error_msg
     
     return False, f"Failed after {max_retries} attempts"
 

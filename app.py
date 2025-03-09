@@ -33,6 +33,7 @@ def index():
 async def analyze():
     logging.debug("Analyze route called")
     try:
+        # Get JSON data from request
         data = request.get_json()
         logging.debug(f"Received data: {data}")
         
@@ -41,25 +42,70 @@ async def analyze():
             return jsonify({'error': 'No URL provided'}), 400
         
         url = data['url']
+        search_type = data.get('searchType', 'all')  # Default to 'all' if not specified
+        logging.debug(f"Processing URL: {url} with search type: {search_type}")
+        
         if not validators.url(url):
             logging.error(f"Invalid URL format: {url}")
             return jsonify({'error': 'Invalid URL format'}), 400
         
         domain = extract_main_domain(url)
-        results = []
+        logging.debug(f"Extracted domain: {domain}")
         
-        # Handle different search types
-        if data.get('domain_age_only'):
-            results = get_domain_info(url)
-        elif data.get('headers_only'):
-            results = await get_media_dates(url)
-        elif data.get('certs_only'):
-            cert_data = get_certificate_data(domain)
-            if cert_data:
-                results = [cert_data]
+        all_results = {
+            'rdap': [],
+            'headers': [],
+            'certs': []
+        }
         
-        logging.debug(f"Final results: {results}")
-        return jsonify(results)
+        try:
+            # Handle different search types
+            if search_type == 'all':
+                logging.debug("Getting all data types...")
+                # Get RDAP data
+                rdap_results = get_domain_info(url)
+                if rdap_results:
+                    all_results['rdap'] = rdap_results
+                
+                # Get Headers data
+                headers_results = await get_media_dates(url)
+                if headers_results:
+                    all_results['headers'] = headers_results
+                
+                # Get Certificate data
+                success, cert_data = get_first_certificate(domain)
+                if success and cert_data:
+                    all_results['certs'] = [cert_data]
+                else:
+                    logging.warning(f"Certificate data fetch failed: {cert_data}")
+                
+                return jsonify(all_results)
+                
+            elif search_type == 'rdap':
+                logging.debug("Getting domain info...")
+                results = get_domain_info(url)
+                return jsonify(results if results else [])
+                
+            elif search_type == 'headers':
+                logging.debug("Getting media dates...")
+                results = await get_media_dates(url)
+                return jsonify(results if results else [])
+                
+            elif search_type == 'certs':
+                logging.debug("Getting certificate data...")
+                success, cert_data = get_first_certificate(domain)
+                if success:
+                    return jsonify([cert_data])
+                else:
+                    logging.error(f"Certificate error: {cert_data}")
+                    return jsonify({'error': str(cert_data)}), 400
+            
+            else:
+                return jsonify({'error': 'Invalid search type'}), 400
+                
+        except Exception as e:
+            logging.error(f"Error processing request: {str(e)}", exc_info=True)
+            return jsonify({'error': f"Error processing request: {str(e)}"}), 500
     
     except Exception as e:
         logging.error(f"Error in analyze route: {str(e)}", exc_info=True)
@@ -70,10 +116,13 @@ def export(export_type):
     try:
         data = request.json
         domain = data.get('domain', 'unknown')
-        timestamp = datetime.now().strftime('%d-%m-%Y-%H%M%S')
+        # Replace dots with underscores in domain name
+        domain = domain.replace('.', '_')
+        # Format timestamp as DDMMYYYY
+        timestamp = datetime.now().strftime('%d%m%Y')
         
         if export_type == 'all':
-            # Create a ZIP file containing both CSVs
+            # Create a ZIP file containing all CSVs
             memory_file = io.BytesIO()
             with zipfile.ZipFile(memory_file, 'w') as zf:
                 # Export RDAP data
@@ -81,7 +130,7 @@ def export(export_type):
                     rdap_df = pd.DataFrame(data['rdap_data'])
                     rdap_csv = io.StringIO()
                     rdap_df.to_csv(rdap_csv, index=False)
-                    rdap_filename = f"{domain}_rdap_{timestamp}.csv"
+                    rdap_filename = f"{domain}_{timestamp}_rdap.csv"
                     zf.writestr(rdap_filename, rdap_csv.getvalue())
 
                 # Export Headers data
@@ -89,32 +138,46 @@ def export(export_type):
                     headers_df = pd.DataFrame(data['headers_data'])
                     headers_csv = io.StringIO()
                     headers_df.to_csv(headers_csv, index=False)
-                    headers_filename = f"{domain}_headers_{timestamp}.csv"
+                    headers_filename = f"{domain}_{timestamp}_headers.csv"
                     zf.writestr(headers_filename, headers_csv.getvalue())
+                    
+                # Export Certificate data
+                if 'cert_data' in data:
+                    cert_df = pd.DataFrame(data['cert_data'])
+                    cert_csv = io.StringIO()
+                    cert_df.to_csv(cert_csv, index=False)
+                    cert_filename = f"{domain}_{timestamp}_certs.csv"
+                    zf.writestr(cert_filename, cert_csv.getvalue())
 
             memory_file.seek(0)
-            return send_file(
+            zip_filename = f"{domain}_{timestamp}_all.zip"
+            response = send_file(
                 memory_file,
                 mimetype='application/zip',
                 as_attachment=True,
-                download_name=f"{domain}_all_{timestamp}.zip"
+                download_name=zip_filename
             )
+            response.headers['Content-Disposition'] = f'attachment; filename="{zip_filename}"'
+            return response
         else:
             # Export single table
             df = pd.DataFrame(data['table_data'])
             output = io.StringIO()
             df.to_csv(output, index=False)
             
-            filename = f"{domain}_{export_type}_{timestamp}.csv"
+            filename = f"{domain}_{timestamp}_{export_type}.csv"
             
-            return send_file(
+            response = send_file(
                 io.BytesIO(output.getvalue().encode('utf-8')),
                 mimetype='text/csv',
                 as_attachment=True,
                 download_name=filename
             )
+            response.headers['Content-Disposition'] = f'attachment; filename="{filename}"'
+            return response
+            
     except Exception as e:
-        logging.error(f"Error in export route: {str(e)}", exc_info=True)
+        logging.error(f"Error in export route: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/export/all', methods=['POST'])
@@ -122,7 +185,10 @@ def export_all():
     try:
         data = request.json
         domain = data.get('domain', 'unknown')
-        timestamp = datetime.now().strftime('%d-%m-%Y-%H%M%S')
+        # Replace dots with underscores in domain name
+        domain = domain.replace('.', '_')
+        # Format timestamp as DDMMYYYY
+        timestamp = datetime.now().strftime('%d%m%Y')
         
         memory_file = io.BytesIO()
         with zipfile.ZipFile(memory_file, 'w') as zf:
@@ -131,7 +197,7 @@ def export_all():
                 rdap_df = pd.DataFrame(data['rdap_data'])
                 rdap_csv = io.StringIO()
                 rdap_df.to_csv(rdap_csv, index=False)
-                rdap_filename = f"{domain}_rdap_{timestamp}.csv"
+                rdap_filename = f"{domain}_{timestamp}_rdap.csv"
                 zf.writestr(rdap_filename, rdap_csv.getvalue())
 
             # Export Certificate data
@@ -139,7 +205,7 @@ def export_all():
                 cert_df = pd.DataFrame(data['cert_data'])
                 cert_csv = io.StringIO()
                 cert_df.to_csv(cert_csv, index=False)
-                cert_filename = f"{domain}_certs_{timestamp}.csv"
+                cert_filename = f"{domain}_{timestamp}_certs.csv"
                 zf.writestr(cert_filename, cert_csv.getvalue())
 
             # Export Headers data
@@ -147,18 +213,21 @@ def export_all():
                 headers_df = pd.DataFrame(data['headers_data'])
                 headers_csv = io.StringIO()
                 headers_df.to_csv(headers_csv, index=False)
-                headers_filename = f"{domain}_headers_{timestamp}.csv"
+                headers_filename = f"{domain}_{timestamp}_headers.csv"
                 zf.writestr(headers_filename, headers_csv.getvalue())
 
         memory_file.seek(0)
-        return send_file(
+        zip_filename = f"{domain}_{timestamp}_all.zip"
+        response = send_file(
             memory_file,
             mimetype='application/zip',
             as_attachment=True,
-            download_name=f"{domain}_all_{timestamp}.zip"
+            download_name=zip_filename
         )
+        response.headers['Content-Disposition'] = f'attachment; filename="{zip_filename}"'
+        return response
     except Exception as e:
-        logging.error(f"Error in export route: {str(e)}", exc_info=True)
+        logging.error(f"Error in export route: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/search', methods=['POST'])

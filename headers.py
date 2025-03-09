@@ -5,12 +5,14 @@ from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import TimeoutException, WebDriverException, StaleElementReferenceException
 from webdriver_manager.chrome import ChromeDriverManager
 import asyncio
 import aiohttp
 from datetime import datetime, timezone
 import logging
 from urllib.parse import urlparse
+import time
 
 def format_datetime(dt):
     """Format datetime to DD-MM-YYYY HH:mm:ss Z"""
@@ -61,6 +63,34 @@ async def get_last_modified(session, url):
         logging.error(f"Error fetching last-modified for {url}: {str(e)}")
         return None
 
+def get_element_with_retry(driver, by, value, max_retries=3, timeout=10):
+    """Helper function to get elements with retry logic for stale elements"""
+    for attempt in range(max_retries):
+        try:
+            element = WebDriverWait(driver, timeout).until(
+                EC.presence_of_element_located((by, value))
+            )
+            return element
+        except StaleElementReferenceException:
+            if attempt == max_retries - 1:
+                raise
+            time.sleep(1)
+    return None
+
+def get_elements_with_retry(driver, by, value, max_retries=3, timeout=10):
+    """Helper function to get elements with retry logic for stale elements"""
+    for attempt in range(max_retries):
+        try:
+            elements = WebDriverWait(driver, timeout).until(
+                EC.presence_of_all_elements_located((by, value))
+            )
+            return elements
+        except StaleElementReferenceException:
+            if attempt == max_retries - 1:
+                raise
+            time.sleep(1)
+    return []
+
 async def get_media_dates(url):
     chrome_options = Options()
     chrome_options.add_argument('--headless')
@@ -75,70 +105,116 @@ async def get_media_dates(url):
     try:
         service = Service(ChromeDriverManager().install())
         driver = webdriver.Chrome(service=service, options=chrome_options)
+        driver.set_page_load_timeout(30)  # Increased timeout
+        
+        logging.debug(f"Fetching URL: {url}")
         driver.get(url)
         
         # Wait for page to be fully loaded
-        WebDriverWait(driver, 20).until(
+        WebDriverWait(driver, 30).until(
             lambda d: d.execute_script('return document.readyState') == 'complete'
         )
         
         # Additional wait for dynamic content
         try:
-            WebDriverWait(driver, 10).until(
-                lambda d: len(d.find_elements(By.TAG_NAME, "img")) > 0
+            WebDriverWait(driver, 20).until(
+                lambda d: len(d.find_elements(By.TAG_NAME, "img")) > 0 or
+                         len(d.find_elements(By.TAG_NAME, "link")) > 0
             )
-        except:
-            logging.warning("No images found after waiting")
+        except TimeoutException:
+            logging.warning("No images or links found after waiting")
         
-        # Get favicon
+        # Get favicon with retry
         favicon_url = None
-        favicon_elements = driver.find_elements(By.CSS_SELECTOR, "link[rel*='icon']")
-        if favicon_elements:
-            favicon_url = favicon_elements[0].get_attribute('href')
-        elif driver.find_elements(By.CSS_SELECTOR, "/favicon.ico"):
-            favicon_url = f"{urlparse(url).scheme}://{urlparse(url).netloc}/favicon.ico"
+        try:
+            favicon_elements = get_elements_with_retry(driver, By.CSS_SELECTOR, "link[rel*='icon']")
+            if favicon_elements:
+                favicon_url = favicon_elements[0].get_attribute('href')
+            elif driver.find_elements(By.CSS_SELECTOR, "/favicon.ico"):
+                favicon_url = f"{urlparse(url).scheme}://{urlparse(url).netloc}/favicon.ico"
+        except Exception as e:
+            logging.warning(f"Error getting favicon: {str(e)}")
         
-        # Get images
+        # Get images with retry
         VALID_IMAGE_EXTENSIONS = ('.gif', '.jpg', '.jpeg', '.png', '.svg', '.ico', '.webp', 
                                 '.tif', '.tiff', '.bmp', '.heif', '.eps')
         
-        images = []
-        images.extend(driver.find_elements(By.TAG_NAME, 'img'))
-        images.extend(driver.find_elements(By.CSS_SELECTOR, 'picture source[srcset]'))
-        images.extend(driver.find_elements(By.CSS_SELECTOR, '[style*="background-image"]'))
-        
         image_urls = set()
         
-        for img in images:
-            src = img.get_attribute('src')
-            if src:
-                image_urls.add(src)
-            srcset = img.get_attribute('srcset')
-            if srcset:
-                for srcset_part in srcset.split(','):
-                    if srcset_part.strip():
-                        url_part = srcset_part.strip().split(' ')[0]
-                        image_urls.add(url_part)
+        # Get images from img tags
+        try:
+            images = get_elements_with_retry(driver, By.TAG_NAME, 'img')
+            for img in images:
+                try:
+                    src = img.get_attribute('src')
+                    if src:
+                        image_urls.add(src)
+                except StaleElementReferenceException:
+                    continue
+        except Exception as e:
+            logging.warning(f"Error getting images: {str(e)}")
         
+        # Get images from picture sources
+        try:
+            sources = get_elements_with_retry(driver, By.CSS_SELECTOR, 'picture source[srcset]')
+            for source in sources:
+                try:
+                    srcset = source.get_attribute('srcset')
+                    if srcset:
+                        for srcset_part in srcset.split(','):
+                            if srcset_part.strip():
+                                url_part = srcset_part.strip().split(' ')[0]
+                                image_urls.add(url_part)
+                except StaleElementReferenceException:
+                    continue
+        except Exception as e:
+            logging.warning(f"Error getting picture sources: {str(e)}")
+        
+        # Get background images
+        try:
+            elements_with_bg = get_elements_with_retry(driver, By.CSS_SELECTOR, '[style*="background-image"]')
+            for element in elements_with_bg:
+                try:
+                    style = element.get_attribute('style')
+                    if 'url(' in style:
+                        bg_url = style.split('url(')[1].split(')')[0].strip('"\'')
+                        image_urls.add(bg_url)
+                except StaleElementReferenceException:
+                    continue
+        except Exception as e:
+            logging.warning(f"Error getting background images: {str(e)}")
+        
+        # Filter valid image URLs
         image_urls = [
             url for url in image_urls
             if any(url.lower().endswith(ext) for ext in VALID_IMAGE_EXTENSIONS)
         ]
         
-        # Get videos
-        videos = driver.find_elements(By.TAG_NAME, 'video')
-        video_sources = driver.find_elements(By.CSS_SELECTOR, 'video source')
+        # Get videos with retry
         video_urls = []
+        try:
+            videos = get_elements_with_retry(driver, By.TAG_NAME, 'video')
+            for video in videos:
+                try:
+                    src = video.get_attribute('src')
+                    if src:
+                        video_urls.append(src)
+                except StaleElementReferenceException:
+                    continue
+        except Exception as e:
+            logging.warning(f"Error getting videos: {str(e)}")
         
-        for video in videos:
-            src = video.get_attribute('src')
-            if src:
-                video_urls.append(src)
-        
-        for source in video_sources:
-            src = source.get_attribute('src')
-            if src:
-                video_urls.append(src)
+        try:
+            video_sources = get_elements_with_retry(driver, By.CSS_SELECTOR, 'video source')
+            for source in video_sources:
+                try:
+                    src = source.get_attribute('src')
+                    if src:
+                        video_urls.append(src)
+                except StaleElementReferenceException:
+                    continue
+        except Exception as e:
+            logging.warning(f"Error getting video sources: {str(e)}")
         
         # Create session for async requests
         async with aiohttp.ClientSession() as session:
@@ -166,7 +242,10 @@ async def get_media_dates(url):
         raise
     finally:
         if driver:
-            driver.quit()
+            try:
+                driver.quit()
+            except Exception as e:
+                logging.warning(f"Error closing browser: {str(e)}")
     
     return results
 
