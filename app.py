@@ -7,6 +7,9 @@ import pandas as pd
 import io
 from datetime import datetime, timezone
 import zipfile
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
 
 from headers import get_media_dates
 from rdap import get_domain_info
@@ -262,6 +265,19 @@ def search():
     except Exception as e:
         app.logger.error(f"Error processing search request: {str(e)}")
         return jsonify({'error': str(e)}), 500
+
+def create_chrome_driver():
+    chrome_options = Options()
+    chrome_options.add_argument('--headless=new')
+    chrome_options.add_argument('--no-sandbox')
+    chrome_options.add_argument('--disable-dev-shm-usage')
+    chrome_options.add_argument('--disable-gpu')
+    chrome_options.binary_location = '/usr/bin/google-chrome-stable'
+    chrome_options.add_argument('--window-size=1920,1080')
+    chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36')
+    
+    service = Service()
+    return webdriver.Chrome(options=chrome_options)
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000) 

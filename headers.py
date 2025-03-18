@@ -92,161 +92,136 @@ def get_elements_with_retry(driver, by, value, max_retries=3, timeout=10):
     return []
 
 async def get_media_dates(url):
+    logging.info(f"Starting get_media_dates for URL: {url}")
+    
     chrome_options = Options()
-    chrome_options.add_argument('--headless')
+    chrome_options.add_argument('--headless=new')
     chrome_options.add_argument('--no-sandbox')
     chrome_options.add_argument('--disable-dev-shm-usage')
+    chrome_options.add_argument('--disable-gpu')
     chrome_options.binary_location = '/usr/bin/google-chrome-stable'
+    chrome_options.add_argument('--window-size=1920,1080')
     chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36')
     
     results = []
     driver = None
     
     try:
-        service = Service(ChromeDriverManager().install())
+        logging.info("Initializing Chrome WebDriver")
+        chrome_options.page_load_strategy = 'eager'
+        service = Service()
         driver = webdriver.Chrome(service=service, options=chrome_options)
-        driver.set_page_load_timeout(30)  # Increased timeout
+        driver.set_page_load_timeout(30)
         
-        logging.debug(f"Fetching URL: {url}")
+        logging.info(f"Fetching URL: {url}")
         driver.get(url)
         
-        # Wait for page to be fully loaded
-        WebDriverWait(driver, 30).until(
-            lambda d: d.execute_script('return document.readyState') == 'complete'
-        )
-        
-        # Additional wait for dynamic content
         try:
-            WebDriverWait(driver, 20).until(
-                lambda d: len(d.find_elements(By.TAG_NAME, "img")) > 0 or
-                         len(d.find_elements(By.TAG_NAME, "link")) > 0
+            WebDriverWait(driver, 10).until(
+                lambda d: d.execute_script('return document.readyState') == 'complete'
             )
+            logging.info("Page load complete")
         except TimeoutException:
-            logging.warning("No images or links found after waiting")
+            logging.warning("Page load timeout - continuing with partial content")
         
-        # Get favicon with retry
-        favicon_url = None
+        # Dictionary to store media items with their types
+        media_dict = {}  # Use dictionary instead of set to maintain order
+        
+        # Get favicon URLs
+        favicon_selectors = [
+            "link[rel='icon']",
+            "link[rel='shortcut icon']",
+            "link[rel='apple-touch-icon']",
+            "link[rel*='icon']"
+        ]
+        
+        logging.info("Searching for favicons...")
+        favicon_found = False
+        for selector in favicon_selectors:
+            try:
+                favicon_elements = driver.find_elements(By.CSS_SELECTOR, selector)
+                for favicon in favicon_elements:
+                    favicon_url = favicon.get_attribute('href')
+                    if favicon_url:
+                        media_dict[favicon_url] = 'favicon'
+                        favicon_found = True
+                        logging.info(f"Found favicon: {favicon_url}")
+            except Exception as e:
+                logging.warning(f"Error getting favicon with selector {selector}: {str(e)}")
+        
+        if not favicon_found:
+            default_favicon = f"{urlparse(url).scheme}://{urlparse(url).netloc}/favicon.ico"
+            media_dict[default_favicon] = 'favicon'
+            logging.info(f"Added default favicon location: {default_favicon}")
+        
+        # Get images
+        logging.info("Searching for images...")
         try:
-            favicon_elements = get_elements_with_retry(driver, By.CSS_SELECTOR, "link[rel*='icon']")
-            if favicon_elements:
-                favicon_url = favicon_elements[0].get_attribute('href')
-            elif driver.find_elements(By.CSS_SELECTOR, "/favicon.ico"):
-                favicon_url = f"{urlparse(url).scheme}://{urlparse(url).netloc}/favicon.ico"
-        except Exception as e:
-            logging.warning(f"Error getting favicon: {str(e)}")
-        
-        # Get images with retry
-        VALID_IMAGE_EXTENSIONS = ('.gif', '.jpg', '.jpeg', '.png', '.svg', '.ico', '.webp', 
-                                '.tif', '.tiff', '.bmp', '.heif', '.eps')
-        
-        image_urls = set()
-        
-        # Get images from img tags
-        try:
-            images = get_elements_with_retry(driver, By.TAG_NAME, 'img')
+            images = driver.find_elements(By.TAG_NAME, 'img')
             for img in images:
-                try:
-                    src = img.get_attribute('src')
-                    if src:
-                        image_urls.add(src)
-                except StaleElementReferenceException:
-                    continue
+                src = img.get_attribute('src')
+                if src:
+                    media_dict[src] = 'image'
+                    logging.info(f"Found image: {src}")
         except Exception as e:
             logging.warning(f"Error getting images: {str(e)}")
         
-        # Get images from picture sources
-        try:
-            sources = get_elements_with_retry(driver, By.CSS_SELECTOR, 'picture source[srcset]')
-            for source in sources:
-                try:
-                    srcset = source.get_attribute('srcset')
-                    if srcset:
-                        for srcset_part in srcset.split(','):
-                            if srcset_part.strip():
-                                url_part = srcset_part.strip().split(' ')[0]
-                                image_urls.add(url_part)
-                except StaleElementReferenceException:
-                    continue
-        except Exception as e:
-            logging.warning(f"Error getting picture sources: {str(e)}")
+        # Filter valid URLs
+        VALID_EXTENSIONS = ('.gif', '.jpg', '.jpeg', '.png', '.svg', '.ico', '.webp', 
+                          '.tif', '.tiff', '.bmp', '.heif', '.eps')
         
-        # Get background images
-        try:
-            elements_with_bg = get_elements_with_retry(driver, By.CSS_SELECTOR, '[style*="background-image"]')
-            for element in elements_with_bg:
-                try:
-                    style = element.get_attribute('style')
-                    if 'url(' in style:
-                        bg_url = style.split('url(')[1].split(')')[0].strip('"\'')
-                        image_urls.add(bg_url)
-                except StaleElementReferenceException:
-                    continue
-        except Exception as e:
-            logging.warning(f"Error getting background images: {str(e)}")
+        # Create filtered dictionary
+        filtered_media = {
+            url: type_ for url, type_ in media_dict.items()
+            if url and any(url.lower().endswith(ext) for ext in VALID_EXTENSIONS)
+        }
         
-        # Filter valid image URLs
-        image_urls = [
-            url for url in image_urls
-            if any(url.lower().endswith(ext) for ext in VALID_IMAGE_EXTENSIONS)
-        ]
+        logging.info(f"Found {len(filtered_media)} valid media items")
         
-        # Get videos with retry
-        video_urls = []
-        try:
-            videos = get_elements_with_retry(driver, By.TAG_NAME, 'video')
-            for video in videos:
-                try:
-                    src = video.get_attribute('src')
-                    if src:
-                        video_urls.append(src)
-                except StaleElementReferenceException:
-                    continue
-        except Exception as e:
-            logging.warning(f"Error getting videos: {str(e)}")
-        
-        try:
-            video_sources = get_elements_with_retry(driver, By.CSS_SELECTOR, 'video source')
-            for source in video_sources:
-                try:
-                    src = source.get_attribute('src')
-                    if src:
-                        video_urls.append(src)
-                except StaleElementReferenceException:
-                    continue
-        except Exception as e:
-            logging.warning(f"Error getting video sources: {str(e)}")
-        
-        # Create session for async requests
+        # Process media URLs with aiohttp
         async with aiohttp.ClientSession() as session:
-            tasks = []
+            tasks = {}  # Dictionary to map tasks to their URLs
             
-            if favicon_url:
-                tasks.append(('favicon', favicon_url))
-            for img_url in image_urls:
-                tasks.append(('image', img_url))
-            for video_url in video_urls:
-                tasks.append(('video', video_url))
+            for media_url in filtered_media:
+                task = asyncio.create_task(get_last_modified(session, media_url))
+                tasks[task] = media_url
+                logging.info(f"Created task for URL: {media_url}")
             
-            for file_type, resource_url in tasks:
-                last_modified = await get_last_modified(session, resource_url)
-                if last_modified:
-                    results.append({
-                        'type': file_type,
-                        'url': resource_url,
-                        'last_modified': format_datetime(last_modified),
-                        '_last_modified_dt': last_modified
-                    })
+            # Wait for all tasks with timeout
+            done, pending = await asyncio.wait(tasks.keys(), timeout=30)
+            
+            if pending:
+                logging.warning(f"{len(pending)} tasks did not complete within timeout")
+            
+            logging.info(f"Processing {len(done)} completed tasks")
+            for task in done:
+                media_url = tasks[task]
+                try:
+                    last_modified = task.result()
+                    if last_modified:
+                        result = {
+                            'type': filtered_media[media_url],
+                            'url': media_url,
+                            'last_modified': format_datetime(last_modified),
+                            '_last_modified_dt': last_modified
+                        }
+                        results.append(result)
+                        logging.info(f"Added result: {result}")
+                except Exception as e:
+                    logging.error(f"Error processing {media_url}: {str(e)}")
     
     except Exception as e:
-        logging.error(f"Error processing URL: {str(e)}")
+        logging.error(f"Error in get_media_dates: {str(e)}")
         raise
     finally:
         if driver:
             try:
                 driver.quit()
+                logging.info("Chrome WebDriver closed")
             except Exception as e:
                 logging.warning(f"Error closing browser: {str(e)}")
     
+    logging.info(f"Returning {len(results)} results")
     return results
 
 if __name__ == "__main__":

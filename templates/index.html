@@ -324,133 +324,236 @@
         let timeline = null;
         let timelineItems = new vis.DataSet();
         
+        function updateTimelineFilterVisibility(data) {
+            const rdapCheckbox = document.getElementById('showRdap');
+            const certsCheckbox = document.getElementById('showCerts');
+            const headersCheckbox = document.getElementById('showHeaders');
+            
+            // Hide all checkboxes by default
+            rdapCheckbox.parentElement.style.display = 'none';
+            certsCheckbox.parentElement.style.display = 'none';
+            headersCheckbox.parentElement.style.display = 'none';
+            
+            // Uncheck all checkboxes
+            rdapCheckbox.checked = false;
+            certsCheckbox.checked = false;
+            headersCheckbox.checked = false;
+            
+            // Show and check only relevant checkboxes based on data
+            if (data.rdap && data.rdap.length > 0) {
+                rdapCheckbox.parentElement.style.display = 'block';
+                rdapCheckbox.checked = true;
+            }
+            if (data.certs && data.certs.length > 0) {
+                certsCheckbox.parentElement.style.display = 'block';
+                certsCheckbox.checked = true;
+            }
+            if (data.headers && data.headers.length > 0) {
+                headersCheckbox.parentElement.style.display = 'block';
+                headersCheckbox.checked = true;
+            }
+            
+            // For single module results (when data is an array)
+            if (Array.isArray(data)) {
+                if (data.length > 0) {
+                    if (data[0]['First Seen']) {
+                        certsCheckbox.parentElement.style.display = 'block';
+                        certsCheckbox.checked = true;
+                    } else if (data[0].type === 'Registered' || data[0].type === 'Updated') {
+                        rdapCheckbox.parentElement.style.display = 'block';
+                        rdapCheckbox.checked = true;
+                    } else if (data[0].type === 'favicon' || data[0].type === 'image') {
+                        headersCheckbox.parentElement.style.display = 'block';
+                        headersCheckbox.checked = true;
+                    }
+                }
+            }
+        }
+
         function createTimeline(data) {
+            console.log('Creating timeline with data:', data);
+            
             const container = document.getElementById('visualization');
+            const timelineContainer = document.getElementById('timeline');
+            const timelineButtonContainer = document.getElementById('timelineButtonContainer');
             
-            // Clear existing items
             timelineItems.clear();
-            
             let items = [];
-            let itemId = 1;
-            let minDate = null;
-            let maxDate = null;
-            
-            // Process RDAP data
-            if (data.rdap) {
-                data.rdap.forEach(item => {
-                    if (item.error) return; // Skip error messages
+            let hasData = false;
+
+            let normalizedData = {
+                headers: [],
+                certs: [],
+                rdap: []
+            };
+
+            console.log('Data type:', typeof data);
+            console.log('Is array:', Array.isArray(data));
+
+            // Normalize the data structure
+            if (Array.isArray(data)) {
+                // Check each item in the array
+                data.forEach(item => {
+                    if (item['First Seen']) {
+                        // This is certificate data
+                        normalizedData.certs.push(item);
+                    } else if (item.type === 'favicon' || item.type === 'image') {
+                        normalizedData.headers.push(item);
+                    } else if (item.type === 'Registered' || item.type === 'Updated') {
+                        normalizedData.rdap.push(item);
+                    }
+                });
+            } else if (typeof data === 'object') {
+                // Handle combined or single object results
+                if (data.headers) normalizedData.headers = Array.isArray(data.headers) ? data.headers : [data.headers];
+                if (data.certs) normalizedData.certs = Array.isArray(data.certs) ? data.certs : [data.certs];
+                if (data.rdap) normalizedData.rdap = Array.isArray(data.rdap) ? data.rdap : [data.rdap];
+                
+                // Handle single object results
+                if (data['First Seen']) {
+                    normalizedData.certs = [data];
+                } else if (data.type === 'favicon' || data.type === 'image') {
+                    normalizedData.headers = [data];
+                } else if (data.type === 'Registered' || data.type === 'Updated') {
+                    normalizedData.rdap = [data];
+                }
+            }
+
+            console.log('Normalized data:', normalizedData);
+
+            // Update checkbox visibility based on normalized data
+            updateTimelineFilterVisibility(normalizedData);
+
+            // Process certificate data first
+            normalizedData.certs.forEach(item => {
+                if (item['First Seen']) {
+                    const date = parseDate(item['First Seen']);
+                    console.log('Processing cert date:', item['First Seen'], 'parsed as:', date);
+                    if (date) {
+                        hasData = true;
+                        const timelineItem = {
+                            id: items.length + 1,
+                            content: 'First SSL certificate',
+                            start: date.toISOString(), // Convert to ISO string format
+                            className: 'timeline-cert',
+                            group: 'certs',
+                            title: `First SSL certificate<br>Common Name: ${item['Common Name']}<br>First Seen: ${item['First Seen']}`
+                        };
+                        console.log('Created timeline item:', timelineItem); // Debug log
+                        items.push(timelineItem);
+                    }
+                }
+            });
+
+            // Process headers data
+            normalizedData.headers.forEach(item => {
+                if (item.last_modified) {
                     const date = parseDate(item.last_modified);
                     if (date) {
-                        const label = item.type === 'Registered' ? 'Domain first registered' : 
-                                    item.type === 'Updated' ? 'Domain registration last updated' : 
-                                    item.type;
+                        hasData = true;
                         items.push({
-                            id: itemId++,
-                            content: label,
+                            id: items.length + 1,
+                            content: item.type === 'favicon' ? 'Favicon last modified' : 'Image last modified',
+                            start: date,
+                            className: item.type === 'favicon' ? 'timeline-favicon' : 'timeline-header',
+                            group: 'headers',
+                            title: `${item.type}<br>${item.last_modified}<br>${item.url}`
+                        });
+                    }
+                }
+            });
+
+            // Process RDAP data
+            normalizedData.rdap.forEach(item => {
+                if (!item.error && item.last_modified) {
+                    const date = parseDate(item.last_modified);
+                    if (date) {
+                        hasData = true;
+                        items.push({
+                            id: items.length + 1,
+                            content: item.type === 'Registered' ? 'Domain first registered' : 'Domain registration updated',
                             start: date,
                             className: 'timeline-rdap',
                             group: 'rdap',
-                            title: `${label}<br>${item.last_modified}`
+                            title: `${item.type}<br>${item.last_modified}`
                         });
-                        if (!minDate || date < minDate) minDate = date;
-                        if (!maxDate || date > maxDate) maxDate = date;
                     }
-                });
-            }
-            
-            // Process Certificate data
-            if (data.certs) {
-                const certData = Array.isArray(data.certs) ? data.certs : [data.certs];
-                certData.forEach(item => {
-                    const firstSeen = parseDate(item['First Seen']);
-                    if (firstSeen) {
-                        items.push({
-                            id: itemId++,
-                            content: 'First SSL certificate',
-                            start: firstSeen,
-                            className: 'timeline-cert',
-                            group: 'certs',
-                            title: `First SSL certificate<br>First Seen: ${item['First Seen']}<br>Valid From: ${item['Valid From']}`
-                        });
-                        if (!minDate || firstSeen < minDate) minDate = firstSeen;
-                        if (!maxDate || firstSeen > maxDate) maxDate = firstSeen;
-                    }
-                });
-            }
-            
-            // Process Headers data
-            if (data.headers) {
-                data.headers.forEach(item => {
-                    const date = parseDate(item.last_modified);
-                    if (date) {
-                        const isFavicon = item.type.toLowerCase() === 'favicon';
-                        const label = isFavicon ? 'Favicon last modified' : 'Image last modified';
-                        items.push({
-                            id: itemId++,
-                            content: label,
-                            start: date,
-                            className: isFavicon ? 'timeline-favicon' : 'timeline-header',
-                            group: 'headers',
-                            title: `${label}<br>${item.last_modified}<br>${item.url}`
-                        });
-                        if (!minDate || date < minDate) minDate = date;
-                        if (!maxDate || date > maxDate) maxDate = date;
-                    }
-                });
-            }
-            
-            // Add items to the dataset
-            timelineItems.add(items);
-            
-            // Configure timeline options
-            const options = {
-                height: '300px',
-                showCurrentTime: false,
-                showTooltips: true,
-                horizontalScroll: true,
-                zoomable: true,
-                groupOrder: 'content',  // Order groups alphabetically
-                margin: { item: { horizontal: 10 }}, // Add margin between items
-                orientation: 'top'
-            };
-            
-            // Create or update timeline
-            if (timeline === null) {
-                timeline = new vis.Timeline(container, timelineItems, options);
-            } else {
-                timeline.setOptions(options);
-                timeline.setItems(timelineItems);
-            }
-            
-            // Set initial window with padding
-            if (minDate && maxDate) {
-                const timeSpan = maxDate - minDate;
-                const padding = timeSpan * 0.1; // 10% padding on each side
-                timeline.setWindow(
-                    new Date(minDate.getTime() - padding),
-                    new Date(maxDate.getTime() + padding)
-                );
-            }
-            
-            // Show timeline container
-            document.getElementById('timeline').style.display = 'block';
-            
-            // Initial visibility update
-            updateTimelineVisibility();
-        }
-        
-        function parseDate(dateStr) {
-            try {
-                const [date, time] = dateStr.split(' ');
-                const [day, month, year] = date.split('-');
-                if (time) {
-                    const [hours, minutes, seconds] = time.split(':');
-                    return new Date(year, month - 1, day, hours || 0, minutes || 0, seconds || 0);
                 }
-                return new Date(year, month - 1, day);
-            } catch (e) {
-                console.error('Error parsing date:', dateStr, e);
-                return null;
+            });
+
+            // Update parseDate function to be more explicit
+            function parseDate(dateStr) {
+                if (!dateStr) return null;
+                try {
+                    // Handle DD-MM-YYYY format (used by certificates)
+                    const ddmmyyyy = dateStr.match(/^(\d{2})-(\d{2})-(\d{4})$/);
+                    if (ddmmyyyy) {
+                        const [_, day, month, year] = ddmmyyyy;
+                        const date = new Date(year, month - 1, day);
+                        console.log('Parsed date components:', { year, month, day });
+                        console.log('Resulting date object:', date);
+                        return date;
+                    }
+                    
+                    // Handle other formats
+                    const date = new Date(dateStr);
+                    if (isNaN(date.getTime())) {
+                        console.error('Invalid date:', dateStr);
+                        return null;
+                    }
+                    return date;
+                } catch (e) {
+                    console.error('Error parsing date:', dateStr, e);
+                    return null;
+                }
+            }
+
+            // Only create timeline if we have data
+            if (hasData && items.length > 0) {
+                console.log('Adding items to timeline:', items);
+                
+                // Create a new DataSet with the items
+                timelineItems = new vis.DataSet(items);
+                
+                const options = {
+                    height: '300px',
+                    showCurrentTime: false,
+                    showTooltips: true,
+                    horizontalScroll: true,
+                    zoomable: true,
+                    groupOrder: 'content',
+                    margin: { item: { horizontal: 10 }},
+                    orientation: 'top'
+                };
+
+                if (timeline === null) {
+                    timeline = new vis.Timeline(container, timelineItems, options);
+                } else {
+                    timeline.setOptions(options);
+                    timeline.setItems(timelineItems);
+                }
+
+                // Set window to show all items
+                const dates = items.map(item => new Date(item.start));
+                if (dates.length > 0) {
+                    const minDate = new Date(Math.min(...dates));
+                    const maxDate = new Date(Math.max(...dates));
+                    const timeSpan = maxDate - minDate;
+                    const padding = timeSpan * 0.1;
+                    
+                    timeline.setWindow(
+                        new Date(minDate.getTime() - padding),
+                        new Date(maxDate.getTime() + padding)
+                    );
+                }
+
+                timelineContainer.style.display = 'block';
+                timelineButtonContainer.style.display = 'block';
+                updateTimelineVisibility();
+            } else {
+                console.log('No data to display in timeline');
+                timelineContainer.style.display = 'none';
+                timelineButtonContainer.style.display = 'none';
             }
         }
         
@@ -544,7 +647,7 @@
                 const data = await response.json();
                 console.log('Data received:', data);
                 
-                // Create timeline with the received data
+                // Create timeline and update checkboxes
                 createTimeline(data);
                 
                 // Show results based on search type
