@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+
+{% block title %}About{% endblock %}
+
+{% block extra_css %}
+<style>
+    .markdown-content {
+        max-width: 800px;
+        margin: 0 auto;
+        padding: 20px;
+    }
+    .markdown-content h1 {
+        margin-bottom: 1.5rem;
+    }
+    .markdown-content h2 {
+        margin-top: 2rem;
+        margin-bottom: 1rem;
+    }
+    .markdown-content h3 {
+        margin-top: 1.5rem;
+        color: #2c3e50;
+    }
+    .markdown-content ul {
+        margin-bottom: 1rem;
+    }
+    .markdown-content li {
+        margin-bottom: 0.5rem;
+    }
+    .markdown-content strong {
+        color: #2c3e50;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="markdown-content">
+        {{ content | safe }}
+    </div>
+</div>
+{% endblock %} 

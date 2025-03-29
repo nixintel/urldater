@@ -10,6 +10,8 @@ import zipfile
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
+from markdown2 import Markdown
+import os
 
 from headers import get_media_dates
 from rdap import get_domain_info
@@ -17,6 +19,9 @@ from certs import get_first_certificate, extract_main_domain, get_certificate_da
 
 app = Flask(__name__)
 logging.basicConfig(level=logging.DEBUG)
+
+# Add this near your other imports
+markdowner = Markdown()
 
 @app.before_request
 def log_request_info():
@@ -265,6 +270,22 @@ def search():
     except Exception as e:
         app.logger.error(f"Error processing search request: {str(e)}")
         return jsonify({'error': str(e)}), 500
+
+@app.route('/about')
+def about():
+    try:
+        # Read the markdown file
+        md_path = os.path.join(app.root_path, 'templates', 'about.md')
+        with open(md_path, 'r') as f:
+            content = f.read()
+            
+        # Convert markdown to HTML
+        html_content = markdowner.convert(content)
+        
+        return render_template('about.html', content=html_content)
+    except Exception as e:
+        app.logger.error(f"Error rendering about page: {str(e)}")
+        return f"Error loading about page: {str(e)}", 500
 
 def create_chrome_driver():
     chrome_options = Options()

@@ -1,517 +1,662 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Web Media Analyzer</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/datatables@1.10.18/media/css/jquery.dataTables.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.7.2/font/bootstrap-icons.css">
-    <script src="https://unpkg.com/vis-timeline@latest/standalone/umd/vis-timeline-graph2d.min.js"></script>
-    <link href="https://unpkg.com/vis-timeline@latest/styles/vis-timeline-graph2d.min.css" rel="stylesheet" type="text/css" />
-    <style>
-        body { 
-            padding: 20px;
-            min-height: 100vh;
-            display: flex;
-            flex-direction: column;
-        }
-        .table { margin-top: 20px; }
-        #results { margin-top: 30px; }
-        
-        /* Footer styles */
-        footer {
-            margin-top: auto;
-            padding: 20px 0;
-            text-align: center;
-            color: #666;
-            border-top: 1px solid #eee;
-        }
-        
-        /* Spinner styles */
-        .spinner-container {
-            display: none;
-            margin: 20px 0;
-            text-align: center;
-        }
-        .spinner-text {
-            margin-top: 10px;
-            font-style: italic;
-            color: #666;
-        }
-        .sort-button {
-            background: none;
-            border: none;
-            padding: 0 5px;
-            cursor: pointer;
-        }
-        .filter-controls {
-            margin-bottom: 15px;
-        }
-        .table-controls {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 15px;
-        }
-        #timeline {
-            display: none;
-            margin: 20px 0;
-            padding: 20px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-        }
-        #visualization {
-            height: 300px;
-        }
-        .domain-event {
-            background-color: #007bff !important;
-            color: white !important;
-            border-color: #0056b3 !important;
-            font-weight: bold;
-        }
-        .header-event {
-            background-color: #28a745 !important;
-            color: white !important;
-            border-color: #1e7e34 !important;
-        }
-        .vis-item.vis-selected {
-            background-color: #17a2b8 !important;
-            border-color: #138496 !important;
-        }
-        /* Add timeline styles */
-        .timeline-rdap {
-            background-color: #007bff !important;
-            color: white !important;
-            border-color: #0056b3 !important;
-        }
-        
-        .timeline-cert {
-            background-color: #dc3545 !important;
-            color: white !important;
-            border-color: #bd2130 !important;
-        }
-        
-        .timeline-header {
-            background-color: #28a745 !important;
-            color: white !important;
-            border-color: #1e7e34 !important;
-        }
-        
-        .timeline-favicon {
-            background-color: #ffc107 !important;
-            color: black !important;
-            border-color: #d39e00 !important;
-        }
-        
-        #visualization {
-            margin-top: 20px;
-            border: 1px solid #ddd;
-            padding: 10px;
-            border-radius: 4px;
-            min-height: 300px;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>Web Media Analyzer</h1>
-        <form id="searchForm">
-            <div class="form-group">
-                <div class="input-group">
-                    <input type="text" class="form-control" id="url" name="url" placeholder="Enter URL here..." required>
-                    <button type="submit" class="btn btn-primary">Analyze</button>
-                </div>
-            </div>
-            
-            <div class="form-group mt-3 d-flex gap-4">
-                <div class="form-check">
-                    <input class="form-check-input" type="radio" name="searchType" id="allTypes" value="all" checked>
-                    <label class="form-check-label" for="allTypes">
-                        All Analysis Types
-                        <i class="bi bi-info-circle ms-1" data-bs-toggle="tooltip" data-bs-placement="top" 
-                           title="Performs all available checks: domain age via RDAP, SSL certificates history from crt.sh, and last-modified headers for all media files. These techniques are a mix of active and passive."></i>
-                    </label>
-                </div>
-                <div class="form-check">
-                    <input class="form-check-input" type="radio" name="searchType" id="rdapOnly" value="rdap">
-                    <label class="form-check-label" for="rdapOnly">
-                        Domain History Only
-                        <i class="bi bi-info-circle ms-1" data-bs-toggle="tooltip" data-bs-placement="top" 
-                           title="Checks domain registration and update history using RDAP data. This is a passive technique and will not interact with the target website."></i>
-                    </label>
-                </div>
-                <div class="form-check">
-                    <input class="form-check-input" type="radio" name="searchType" id="certsOnly" value="certs">
-                    <label class="form-check-label" for="certsOnly">
-                        Certificate History Only
-                        <i class="bi bi-info-circle ms-1" data-bs-toggle="tooltip" data-bs-placement="top" 
-                           title="Retrieves SSL certificate history from crt.sh database. This is a passive technique and will not interact with the target website."></i>
-                    </label>
-                </div>
-                <div class="form-check">
-                    <input class="form-check-input" type="radio" name="searchType" id="headersOnly" value="headers">
-                    <label class="form-check-label" for="headersOnly">
-                        Last-Modified Headers Only
-                        <i class="bi bi-info-circle ms-1" data-bs-toggle="tooltip" data-bs-placement="top" 
-                           title="Checks last-modified dates for all media files (images, favicons) on the webpage. This is an active technique and will interact with the target website."></i>
-                    </label>
-                </div>
-            </div>
+{% extends "base.html" %}
 
-        </form>
+{% block title %}Home{% endblock %}
 
-        <!-- Loading Spinner -->
-        <div id="spinner" class="spinner-container">
-            <div class="spinner-border text-primary" role="status">
-                <span class="visually-hidden">Loading...</span>
-            </div>
-            <div class="spinner-text">Analyzing URL... This may take a few moments.</div>
-        </div>
+{% block extra_css %}
+<link href="https://cdn.datatables.net/1.10.18/media/css/jquery.dataTables.min.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.7.2/font/bootstrap-icons.css">
+<script src="https://unpkg.com/vis-timeline@latest/standalone/umd/vis-timeline-graph2d.min.js"></script>
+<link href="https://unpkg.com/vis-timeline@latest/styles/vis-timeline-graph2d.min.css" rel="stylesheet" type="text/css" />
+<style>
+    .table { margin-top: 20px; }
+    #results { margin-top: 30px; }
+    /* ... rest of your existing styles ... */
+    .spinner-container {
+        display: none;
+        margin: 20px 0;
+        text-align: center;
+    }
+    .spinner-text {
+        margin-top: 10px;
+        font-style: italic;
+        color: #666;
+    }
+    .sort-button {
+        background: none;
+        border: none;
+        padding: 0 5px;
+        cursor: pointer;
+    }
+    .filter-controls {
+        margin-bottom: 15px;
+    }
+    .table-controls {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 15px;
+    }
+    #timeline {
+        display: none;
+        margin: 20px 0;
+        padding: 20px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+    }
+    #visualization {
+        height: 300px;
+    }
+    .timeline-rdap {
+        background-color: #007bff !important;
+        color: white !important;
+        border-color: #0056b3 !important;
+    }
+    .timeline-cert {
+        background-color: #dc3545 !important;
+        color: white !important;
+        border-color: #bd2130 !important;
+    }
+    .timeline-header {
+        background-color: #28a745 !important;
+        color: white !important;
+        border-color: #1e7e34 !important;
+    }
+    .timeline-favicon {
+        background-color: #ffc107 !important;
+        color: black !important;
+        border-color: #d39e00 !important;
+    }
+    .dataTables_wrapper .dataTables_filter {
+        float: right;
+        margin-bottom: 10px;
+    }
+    
+    .dataTables_wrapper .dataTables_length {
+        float: left;
+        margin-bottom: 10px;
+    }
+    
+    .dataTables_wrapper .dataTables_paginate .paginate_button {
+        padding: 0.5em 1em;
+        margin-left: 2px;
+        border: 1px solid #ddd;
+        border-radius: 3px;
+        background-color: #fff;
+    }
+    
+    .dataTables_wrapper .dataTables_paginate .paginate_button:hover {
+        background-color: #e9ecef;
+        border-color: #dee2e6;
+    }
+    
+    .dataTables_wrapper .dataTables_paginate .paginate_button.current {
+        background-color: #007bff;
+        border-color: #007bff;
+        color: white !important;
+    }
+    
+    /* Clear the float after the length and filter */
+    .dataTables_wrapper::after {
+        content: "";
+        display: table;
+        clear: both;
+    }
+    
+    /* Update the DataTables wrapper styles */
+    .dataTables_wrapper {
+        margin-top: 20px;
+    }
+    
+    /* Style for the entries info text */
+    .dataTables_info {
+        padding-top: 0.85em !important;
+        clear: both;
+        margin-bottom: 1em;
+    }
+    
+    /* Style for the pagination buttons */
+    .dataTables_wrapper .dataTables_paginate {
+        padding-top: 0.5em;
+        clear: both;
+    }
+    
+    .dataTables_wrapper .dataTables_paginate .paginate_button {
+        padding: 0.5em 1em;
+        margin-left: 5px;
+        border: none;
+        border-radius: 4px;
+        background-color: #0d6efd !important;  /* Bootstrap primary color */
+        color: white !important;
+    }
+    
+    .dataTables_wrapper .dataTables_paginate .paginate_button:hover {
+        background-color: #0b5ed7 !important;  /* Bootstrap primary hover color */
+        border: none;
+    }
+    
+    .dataTables_wrapper .dataTables_paginate .paginate_button.disabled {
+        background-color: #6c757d !important;  /* Bootstrap secondary color */
+        opacity: 0.65;
+        cursor: not-allowed;
+    }
+    
+    /* Remove DataTables default button styles */
+    .dataTables_wrapper .dataTables_paginate .paginate_button:active,
+    .dataTables_wrapper .dataTables_paginate .paginate_button:focus {
+        box-shadow: none;
+        outline: none;
+    }
+    
+    /* Make all export buttons match the "analyze" button color */
+    .btn-export, .export-btn, #exportAllBtn {
+        background-color: #007bff;
+        color: white;
+    }
+    
+    .btn-export:hover, .export-btn:hover, #exportAllBtn:hover {
+        background-color: #0069d9;
+        color: white;
+    }
+</style>
+{% endblock %}
 
-        <div id="results" class="mt-4" style="display: none;">
-            <!-- Add URL title and Export All button at the top -->
-            <h2 class="mb-3">Results for URL: <span id="analyzed-url" class="text-primary"></span></h2>
-            <div class="mb-4">
-                <button class="btn btn-primary" onclick="exportAll()">Export All Data</button>
-            </div>
-
-            <div id="domain-info" class="mt-4">
-                <h3>Domain Information</h3>
-                <div class="table-controls">
-                    <button class="btn btn-secondary" onclick="exportTable('rdap')">Export RDAP Data</button>
-                </div>
-                <table class="table table-striped" id="domain-table">
-                    <thead>
-                        <tr>
-                            <th>Type</th>
-                            <th>URL</th>
-                            <th>Time</th>
-                        </tr>
-                    </thead>
-                    <tbody id="domain-results">
-                    </tbody>
-                </table>
-            </div>
-
-            <!-- Certificate table with export button -->
-            <div id="ssl-certificate" class="mt-4">
-                <h3>SSL Certificate Information</h3>
-                <div class="table-controls">
-                    <button class="btn btn-secondary" onclick="exportTable('certs')">Export Certificate Data</button>
-                </div>
-                <table class="table table-striped">
-                    <thead>
-                        <tr>
-                            <th>Type</th>
-                            <th>Common Name</th>
-                            <th>First Seen</th>
-                            <th>Valid From</th>
-                            <th>Source</th>
-                        </tr>
-                    </thead>
-                    <tbody id="ssl-certificate-results">
-                    </tbody>
-                </table>
-            </div>
-
-            <div id="headers-info" class="mt-4">
-                <h3>Last Modified Headers</h3>
-                <div class="table-controls">
-                    <div>
-                        <button class="btn btn-secondary" onclick="exportTable('headers')">Export Headers Data</button>
-                        <select id="type-filter" class="form-select d-inline-block w-auto ms-2" onchange="filterHeadersResults()">
-                            <option value="all">All Types</option>
-                            <option value="favicon">Favicon</option>
-                            <option value="image">Image</option>
-                        </select>
-                    </div>
-                </div>
-                <table class="table table-striped" id="headers-table">
-                    <thead>
-                        <tr>
-                            <th>Type</th>
-                            <th>URL</th>
-                            <th>Last Modified</th>
-                        </tr>
-                    </thead>
-                    <tbody id="headers-results">
-                    </tbody>
-                </table>
-            </div>
-
-            <!-- Move timeline button inside results div and hide by default -->
-            <div class="mt-4" id="timelineButtonContainer" style="display: none;">
-                <button class="btn btn-primary" id="viewTimelineBtn" onclick="window.showTimeline()">View Timeline</button>
+{% block content %}
+<div class="container">
+    <h1>URL Content Analyser</h1>
+    <form id="searchForm">
+        <div class="form-group">
+            <div class="input-group">
+                <input type="text" class="form-control" id="url" name="url" placeholder="Enter URL here..." required>
+                <button type="submit" class="btn btn-primary">Analyze</button>
             </div>
         </div>
-
-        <!-- First, make sure the timeline container is properly structured -->
-        <div id="timeline" class="mt-4">
-            <h3>Timeline</h3>
-            <div class="mb-3">
-                <div class="form-check form-check-inline">
-                    <input class="form-check-input" type="checkbox" id="showRdap" checked>
-                    <label class="form-check-label" for="showRdap">
-                        <span class="badge bg-primary">Domain Registration Events</span>
-                    </label>
-                </div>
-                <div class="form-check form-check-inline">
-                    <input class="form-check-input" type="checkbox" id="showCerts" checked>
-                    <label class="form-check-label" for="showCerts">
-                        <span class="badge bg-danger">First SSL Certificate</span>
-                    </label>
-                </div>
-                <div class="form-check form-check-inline">
-                    <input class="form-check-input" type="checkbox" id="showHeaders" checked>
-                    <label class="form-check-label" for="showHeaders">
-                        <span class="badge bg-success">Image Last Modified</span>
-                    </label>
-                </div>
+        
+        <div class="form-group mt-3 d-flex gap-4">
+            <div class="form-check">
+                <input class="form-check-input" type="radio" name="searchType" id="allTypes" value="all" checked>
+                <label class="form-check-label" for="allTypes">
+                    All Analysis Types
+                    <i class="bi bi-info-circle ms-1" data-bs-toggle="tooltip" data-bs-placement="top" 
+                       title="Performs all available checks: domain age via RDAP, SSL certificates history from crt.sh, and last-modified headers for all media files. These techniques are a mix of active and passive."></i>
+                </label>
             </div>
-            <div id="visualization"></div>
+            <div class="form-check">
+                <input class="form-check-input" type="radio" name="searchType" id="rdapOnly" value="rdap">
+                <label class="form-check-label" for="rdapOnly">
+                    Domain History Only
+                    <i class="bi bi-info-circle ms-1" data-bs-toggle="tooltip" data-bs-placement="top" 
+                       title="Checks domain registration and update history using RDAP data. This is a passive technique and will not interact with the target website."></i>
+                </label>
+            </div>
+            <div class="form-check">
+                <input class="form-check-input" type="radio" name="searchType" id="certsOnly" value="certs">
+                <label class="form-check-label" for="certsOnly">
+                    Certificate History Only
+                    <i class="bi bi-info-circle ms-1" data-bs-toggle="tooltip" data-bs-placement="top" 
+                       title="Retrieves SSL certificate history from crt.sh database. This is a passive technique and will not interact with the target website."></i>
+                </label>
+            </div>
+            <div class="form-check">
+                <input class="form-check-input" type="radio" name="searchType" id="headersOnly" value="headers">
+                <label class="form-check-label" for="headersOnly">
+                    Last-Modified Headers Only
+                    <i class="bi bi-info-circle ms-1" data-bs-toggle="tooltip" data-bs-placement="top" 
+                       title="Checks last-modified dates for all media files (images, favicons) on the webpage. This is an active technique and will interact with the target website."></i>
+                </label>
+            </div>
         </div>
+    </form>
 
-        <div id="error" class="alert alert-danger d-none"></div>
+    <!-- Loading Spinner -->
+    <div id="spinner" class="spinner-container">
+        <div class="spinner-border text-primary" role="status">
+            <span class="visually-hidden">Loading...</span>
+        </div>
+        <div class="spinner-text">Analyzing URL... This may take a few moments.</div>
     </div>
 
-    <footer>
-        <div class="container">
-            Copyright © Steven Harris  <span id="copyright-year"></span> <a href="https://www.nixintel.info" target="_blank">www.nixintel.info</a> 
+    <div id="results" class="mt-4" style="display: none;">
+        <!-- Add URL title and Export All button at the top -->
+        <h2 class="mb-3">Results for URL: <span id="analyzed-url" class="text-primary"></span></h2>
+        <div class="mb-4">
+            <button class="btn btn-primary" onclick="exportAll()">Export All Data</button>
         </div>
-    </footer>
 
-    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="https://cdn.datatables.net/1.10.24/js/jquery.dataTables.min.js"></script>
-    <script>
-    document.addEventListener('DOMContentLoaded', function() {
-        // Set copyright year
-        document.getElementById('copyright-year').textContent = new Date().getFullYear();
+        <div id="domain-info" class="mt-4">
+            <h3>Domain Information</h3>
+            <div class="table-controls">
+                <button class="btn btn-primary" onclick="exportTable('rdap')">Export RDAP Data</button>
+            </div>
+            <table class="table table-striped" id="domain-table">
+                <thead>
+                    <tr>
+                        <th>Type</th>
+                        <th>URL</th>
+                        <th>Time</th>
+                    </tr>
+                </thead>
+                <tbody id="domain-results">
+                </tbody>
+            </table>
+        </div>
 
-        // Initialize all tooltips
-        var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'))
-        var tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
-            return new bootstrap.Tooltip(tooltipTriggerEl)
+        <!-- Certificate table with export button -->
+        <div id="ssl-certificate" class="mt-4">
+            <h3>SSL Certificate Information</h3>
+            <div class="table-controls">
+                <button class="btn btn-primary" onclick="exportTable('certs')">Export Certificate Data</button>
+            </div>
+            <table class="table table-striped">
+                <thead>
+                    <tr>
+                        <th>Type</th>
+                        <th>Common Name</th>
+                        <th>First Seen</th>
+                        <th>Valid From</th>
+                        <th>Source</th>
+                    </tr>
+                </thead>
+                <tbody id="ssl-certificate-results">
+                </tbody>
+            </table>
+        </div>
+
+        <div id="headers-info" class="mt-4">
+            <h3>Last Modified Headers</h3>
+            <div class="table-controls">
+                <div>
+                    <button class="btn btn-primary" onclick="exportTable('headers')">Export Headers Data</button>
+                    <select id="type-filter" class="form-select d-inline-block w-auto ms-2" onchange="filterHeadersResults()">
+                        <option value="all">All Types</option>
+                        <option value="favicon">Favicon</option>
+                        <option value="image">Image</option>
+                    </select>
+                </div>
+            </div>
+            <table class="table table-striped" id="headers-table">
+                <thead>
+                    <tr>
+                        <th>Type</th>
+                        <th>URL</th>
+                        <th>Last Modified</th>
+                    </tr>
+                </thead>
+                <tbody id="headers-results">
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- First, make sure the timeline container is properly structured -->
+    <div id="timeline" class="mt-4">
+        <h3>Timeline</h3>
+        <div class="mb-3">
+            <div class="form-check form-check-inline">
+                <input class="form-check-input" type="checkbox" id="showRdap" checked>
+                <label class="form-check-label" for="showRdap">
+                    <span class="badge bg-primary">Domain Registration Events</span>
+                </label>
+            </div>
+            <div class="form-check form-check-inline">
+                <input class="form-check-input" type="checkbox" id="showCerts" checked>
+                <label class="form-check-label" for="showCerts">
+                    <span class="badge bg-danger">First SSL Certificate</span>
+                </label>
+            </div>
+            <div class="form-check form-check-inline">
+                <input class="form-check-input" type="checkbox" id="showHeaders" checked>
+                <label class="form-check-label" for="showHeaders">
+                    <span class="badge bg-success">Image Last Modified</span>
+                </label>
+            </div>
+        </div>
+        <div id="visualization"></div>
+    </div>
+
+    <div id="error" class="alert alert-danger d-none"></div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.datatables.net/1.10.24/js/jquery.dataTables.min.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Set copyright year
+    document.getElementById('copyright-year').textContent = new Date().getFullYear();
+
+    // Initialize all tooltips
+    var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'))
+    var tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
+        return new bootstrap.Tooltip(tooltipTriggerEl)
+    });
+
+    console.log('Page loaded');
+    
+    // Get DOM elements
+    const searchForm = document.getElementById('searchForm');
+    const spinner = document.getElementById('spinner');
+    const results = document.getElementById('results');
+    const errorDiv = document.getElementById('error');
+
+    // Initialize DataTables
+    let domainTable = null;
+    let headersTable = null;
+
+    if (!searchForm) {
+        console.error('Search form not found!');
+        return;
+    }
+
+    console.log('Form found:', searchForm);
+
+    // Initialize global variables
+    window.domainResults = [];
+    window.certResults = [];
+    window.headerResults = [];
+    window.headersPagination = { currentPage: 1, perPage: 10 };
+    window.currentTimeline = null;
+
+    let timeline = null;
+    let timelineItems = new vis.DataSet();
+    
+    function updateTimelineFilterVisibility(data) {
+        const rdapCheckbox = document.getElementById('showRdap');
+        const certsCheckbox = document.getElementById('showCerts');
+        const headersCheckbox = document.getElementById('showHeaders');
+        
+        // Hide all checkboxes by default
+        rdapCheckbox.parentElement.style.display = 'none';
+        certsCheckbox.parentElement.style.display = 'none';
+        headersCheckbox.parentElement.style.display = 'none';
+        
+        // Uncheck all checkboxes
+        rdapCheckbox.checked = false;
+        certsCheckbox.checked = false;
+        headersCheckbox.checked = false;
+        
+        // Show and check only relevant checkboxes based on data
+        if (data.rdap && data.rdap.length > 0) {
+            rdapCheckbox.parentElement.style.display = 'block';
+            rdapCheckbox.checked = true;
+        }
+        if (data.certs && data.certs.length > 0) {
+            certsCheckbox.parentElement.style.display = 'block';
+            certsCheckbox.checked = true;
+        }
+        if (data.headers && data.headers.length > 0) {
+            headersCheckbox.parentElement.style.display = 'block';
+            headersCheckbox.checked = true;
+        }
+        
+        // For single module results (when data is an array)
+        if (Array.isArray(data)) {
+            if (data.length > 0) {
+                if (data[0]['First Seen']) {
+                    certsCheckbox.parentElement.style.display = 'block';
+                    certsCheckbox.checked = true;
+                } else if (data[0].type === 'Registered' || data[0].type === 'Updated') {
+                    rdapCheckbox.parentElement.style.display = 'block';
+                    rdapCheckbox.checked = true;
+                } else if (data[0].type === 'favicon' || data[0].type === 'image') {
+                    headersCheckbox.parentElement.style.display = 'block';
+                    headersCheckbox.checked = true;
+                }
+            }
+        }
+    }
+
+    function createTimeline(data) {
+        console.log('Creating timeline with data:', data);
+        
+        const container = document.getElementById('visualization');
+        const timelineContainer = document.getElementById('timeline');
+        
+        timelineItems.clear();
+        let items = [];
+        let hasData = false;
+
+        let normalizedData = {
+            headers: [],
+            certs: [],
+            rdap: []
+        };
+
+        console.log('Data type:', typeof data);
+        console.log('Is array:', Array.isArray(data));
+
+        // Normalize the data structure
+        if (Array.isArray(data)) {
+            // Check each item in the array
+            data.forEach(item => {
+                if (item['First Seen']) {
+                    // This is certificate data
+                    normalizedData.certs.push(item);
+                } else if (item.type === 'favicon' || item.type === 'image') {
+                    normalizedData.headers.push(item);
+                } else if (item.type === 'Registered' || item.type === 'Updated') {
+                    normalizedData.rdap.push(item);
+                }
+            });
+        } else if (typeof data === 'object') {
+            // Handle combined or single object results
+            if (data.headers) normalizedData.headers = Array.isArray(data.headers) ? data.headers : [data.headers];
+            if (data.certs) normalizedData.certs = Array.isArray(data.certs) ? data.certs : [data.certs];
+            if (data.rdap) normalizedData.rdap = Array.isArray(data.rdap) ? data.rdap : [data.rdap];
+            
+            // Handle single object results
+            if (data['First Seen']) {
+                normalizedData.certs = [data];
+            } else if (data.type === 'favicon' || data.type === 'image') {
+                normalizedData.headers = [data];
+            } else if (data.type === 'Registered' || data.type === 'Updated') {
+                normalizedData.rdap = [data];
+            }
+        }
+
+        console.log('Normalized data:', normalizedData);
+
+        // Update checkbox visibility based on normalized data
+        updateTimelineFilterVisibility(normalizedData);
+
+        // Process certificate data first
+        normalizedData.certs.forEach(item => {
+            if (item['First Seen']) {
+                console.log('Processing cert item:', item);
+                let date = null;
+                
+                // Direct handling for certificate date format "DD-MM-YYYY"
+                const dateStr = item['First Seen'];
+                const dateRegex = /^(\d{2})-(\d{2})-(\d{4})$/;
+                const match = dateStr.match(dateRegex);
+                
+                if (match) {
+                    const [_, day, month, year] = match;
+                    date = new Date(Date.UTC(
+                        parseInt(year, 10),
+                        parseInt(month, 10) - 1,
+                        parseInt(day, 10),
+                        0, 0, 0 // Use midnight UTC
+                    ));
+                    console.log('Parsed certificate date with UTC preservation:', date);
+                }
+                
+                if (date && !isNaN(date.getTime())) {
+                    hasData = true;
+                    const timelineItem = {
+                        id: items.length + 1,
+                        content: 'First SSL certificate',
+                        start: date,
+                        className: 'timeline-cert',
+                        group: 'certs',
+                        title: `First SSL certificate<br>Common Name: ${item['Common Name']}<br>First Seen: ${item['First Seen']}`
+                    };
+                    console.log('Added certificate event to timeline with date:', date);
+                    items.push(timelineItem);
+                } else {
+                    console.error('Failed to parse certificate date:', item['First Seen']);
+                }
+            }
         });
 
-        console.log('Page loaded');
-        
-        // Get DOM elements
-        const searchForm = document.getElementById('searchForm');
-        const spinner = document.getElementById('spinner');
-        const results = document.getElementById('results');
-        const errorDiv = document.getElementById('error');
-
-        // Initialize DataTables
-        let domainTable = null;
-        let headersTable = null;
-
-        if (!searchForm) {
-            console.error('Search form not found!');
-            return;
-        }
-
-        console.log('Form found:', searchForm);
-
-        // Initialize global variables
-        window.domainResults = [];
-        window.certResults = [];
-        window.headerResults = [];
-        window.headersPagination = { currentPage: 1, perPage: 10 };
-        window.currentTimeline = null;
-
-        let timeline = null;
-        let timelineItems = new vis.DataSet();
-        
-        function updateTimelineFilterVisibility(data) {
-            const rdapCheckbox = document.getElementById('showRdap');
-            const certsCheckbox = document.getElementById('showCerts');
-            const headersCheckbox = document.getElementById('showHeaders');
-            
-            // Hide all checkboxes by default
-            rdapCheckbox.parentElement.style.display = 'none';
-            certsCheckbox.parentElement.style.display = 'none';
-            headersCheckbox.parentElement.style.display = 'none';
-            
-            // Uncheck all checkboxes
-            rdapCheckbox.checked = false;
-            certsCheckbox.checked = false;
-            headersCheckbox.checked = false;
-            
-            // Show and check only relevant checkboxes based on data
-            if (data.rdap && data.rdap.length > 0) {
-                rdapCheckbox.parentElement.style.display = 'block';
-                rdapCheckbox.checked = true;
-            }
-            if (data.certs && data.certs.length > 0) {
-                certsCheckbox.parentElement.style.display = 'block';
-                certsCheckbox.checked = true;
-            }
-            if (data.headers && data.headers.length > 0) {
-                headersCheckbox.parentElement.style.display = 'block';
-                headersCheckbox.checked = true;
-            }
-            
-            // For single module results (when data is an array)
-            if (Array.isArray(data)) {
-                if (data.length > 0) {
-                    if (data[0]['First Seen']) {
-                        certsCheckbox.parentElement.style.display = 'block';
-                        certsCheckbox.checked = true;
-                    } else if (data[0].type === 'Registered' || data[0].type === 'Updated') {
-                        rdapCheckbox.parentElement.style.display = 'block';
-                        rdapCheckbox.checked = true;
-                    } else if (data[0].type === 'favicon' || data[0].type === 'image') {
-                        headersCheckbox.parentElement.style.display = 'block';
-                        headersCheckbox.checked = true;
-                    }
-                }
-            }
-        }
-
-        function createTimeline(data) {
-            console.log('Creating timeline with data:', data);
-            
-            const container = document.getElementById('visualization');
-            const timelineContainer = document.getElementById('timeline');
-            const timelineButtonContainer = document.getElementById('timelineButtonContainer');
-            
-            timelineItems.clear();
-            let items = [];
-            let hasData = false;
-
-            let normalizedData = {
-                headers: [],
-                certs: [],
-                rdap: []
-            };
-
-            console.log('Data type:', typeof data);
-            console.log('Is array:', Array.isArray(data));
-
-            // Normalize the data structure
-            if (Array.isArray(data)) {
-                // Check each item in the array
-                data.forEach(item => {
-                    if (item['First Seen']) {
-                        // This is certificate data
-                        normalizedData.certs.push(item);
-                    } else if (item.type === 'favicon' || item.type === 'image') {
-                        normalizedData.headers.push(item);
-                    } else if (item.type === 'Registered' || item.type === 'Updated') {
-                        normalizedData.rdap.push(item);
-                    }
-                });
-            } else if (typeof data === 'object') {
-                // Handle combined or single object results
-                if (data.headers) normalizedData.headers = Array.isArray(data.headers) ? data.headers : [data.headers];
-                if (data.certs) normalizedData.certs = Array.isArray(data.certs) ? data.certs : [data.certs];
-                if (data.rdap) normalizedData.rdap = Array.isArray(data.rdap) ? data.rdap : [data.rdap];
+        // Process headers data
+        normalizedData.headers.forEach(item => {
+            if (item.last_modified) {
+                console.log('Processing headers item:', item);
+                let date = null;
                 
-                // Handle single object results
-                if (data['First Seen']) {
-                    normalizedData.certs = [data];
-                } else if (data.type === 'favicon' || data.type === 'image') {
-                    normalizedData.headers = [data];
-                } else if (data.type === 'Registered' || data.type === 'Updated') {
-                    normalizedData.rdap = [data];
+                // Direct handling for headers date format "DD-MM-YYYY HH:MM:SS"
+                const dateStr = item.last_modified;
+                const dateRegex = /^(\d{2})-(\d{2})-(\d{4})\s(\d{2}):(\d{2}):(\d{2})(?:\s+([A-Z]+))?$/;
+                const match = dateStr.match(dateRegex);
+                
+                if (match) {
+                    const [_, day, month, year, hours, minutes, seconds, timezone] = match;
+                    date = new Date(Date.UTC(
+                        parseInt(year, 10),
+                        parseInt(month, 10) - 1,
+                        parseInt(day, 10),
+                        parseInt(hours, 10),
+                        parseInt(minutes, 10),
+                        parseInt(seconds, 10)
+                    ));
+                    console.log('Parsed headers date with UTC preservation:', date);
+                }
+                
+                if (date && !isNaN(date.getTime())) {
+                    hasData = true;
+                    items.push({
+                        id: items.length + 1,
+                        content: item.type === 'favicon' ? 'Favicon last modified' : 'Image last modified',
+                        start: date,
+                        className: item.type === 'favicon' ? 'timeline-favicon' : 'timeline-header',
+                        group: 'headers',
+                        title: `${item.type}<br>${item.last_modified}<br>${item.url}`
+                    });
+                    console.log('Added headers event to timeline with date:', date);
+                } else {
+                    console.error('Failed to parse headers date:', item.last_modified);
                 }
             }
+        });
 
-            console.log('Normalized data:', normalizedData);
-
-            // Update checkbox visibility based on normalized data
-            updateTimelineFilterVisibility(normalizedData);
-
-            // Process certificate data first
-            normalizedData.certs.forEach(item => {
-                if (item['First Seen']) {
-                    const date = parseDate(item['First Seen']);
-                    console.log('Processing cert date:', item['First Seen'], 'parsed as:', date);
-                    if (date) {
-                        hasData = true;
-                        const timelineItem = {
-                            id: items.length + 1,
-                            content: 'First SSL certificate',
-                            start: date.toISOString(), // Convert to ISO string format
-                            className: 'timeline-cert',
-                            group: 'certs',
-                            title: `First SSL certificate<br>Common Name: ${item['Common Name']}<br>First Seen: ${item['First Seen']}`
-                        };
-                        console.log('Created timeline item:', timelineItem); // Debug log
-                        items.push(timelineItem);
-                    }
-                }
-            });
-
-            // Process headers data
-            normalizedData.headers.forEach(item => {
-                if (item.last_modified) {
-                    const date = parseDate(item.last_modified);
-                    if (date) {
-                        hasData = true;
-                        items.push({
-                            id: items.length + 1,
-                            content: item.type === 'favicon' ? 'Favicon last modified' : 'Image last modified',
-                            start: date,
-                            className: item.type === 'favicon' ? 'timeline-favicon' : 'timeline-header',
-                            group: 'headers',
-                            title: `${item.type}<br>${item.last_modified}<br>${item.url}`
-                        });
-                    }
-                }
-            });
-
-            // Process RDAP data
-            normalizedData.rdap.forEach(item => {
-                if (!item.error && item.last_modified) {
-                    const date = parseDate(item.last_modified);
-                    if (date) {
-                        hasData = true;
-                        items.push({
-                            id: items.length + 1,
-                            content: item.type === 'Registered' ? 'Domain first registered' : 'Domain registration updated',
-                            start: date,
-                            className: 'timeline-rdap',
-                            group: 'rdap',
-                            title: `${item.type}<br>${item.last_modified}`
-                        });
-                    }
-                }
-            });
-
-            // Update parseDate function to be more explicit
-            function parseDate(dateStr) {
-                if (!dateStr) return null;
-                try {
-                    // Handle DD-MM-YYYY format (used by certificates)
-                    const ddmmyyyy = dateStr.match(/^(\d{2})-(\d{2})-(\d{4})$/);
-                    if (ddmmyyyy) {
-                        const [_, day, month, year] = ddmmyyyy;
-                        const date = new Date(year, month - 1, day);
-                        console.log('Parsed date components:', { year, month, day });
-                        console.log('Resulting date object:', date);
-                        return date;
-                    }
-                    
-                    // Handle other formats
-                    const date = new Date(dateStr);
+        // Process RDAP data
+        normalizedData.rdap.forEach(item => {
+            console.log('Processing RDAP item:', item);
+            
+            // Handle registration events
+            if (item.type === 'Registered' && !item.error) {
+                let date = null;
+                
+                // First try to use the _registered_dt field directly
+                if (item._registered_dt) {
+                    console.log('Using _registered_dt field directly:', item._registered_dt);
+                    date = new Date(item._registered_dt);
                     if (isNaN(date.getTime())) {
-                        console.error('Invalid date:', dateStr);
-                        return null;
+                        console.error('Invalid date from _registered_dt:', item._registered_dt);
+                        date = null;
                     }
-                    return date;
-                } catch (e) {
-                    console.error('Error parsing date:', dateStr, e);
-                    return null;
+                }
+                
+                // Fallback: If _registered_dt is missing or invalid, use the string but preserve timezone
+                if (!date && (item.registered || item.last_modified)) {
+                    console.log('Falling back to string date:', item.registered || item.last_modified);
+                    
+                    // Direct handling for our specific format "DD-MM-YYYY HH:MM:SS UTC"
+                    const dateStr = item.registered || item.last_modified;
+                    const dateRegex = /^(\d{2})-(\d{2})-(\d{4})\s(\d{2}):(\d{2}):(\d{2})\s+UTC$/;
+                    const match = dateStr.match(dateRegex);
+                    
+                    if (match) {
+                        const [_, day, month, year, hours, minutes, seconds] = match;
+                        date = new Date(Date.UTC(
+                            parseInt(year, 10),
+                            parseInt(month, 10) - 1,
+                            parseInt(day, 10),
+                            parseInt(hours, 10),
+                            parseInt(minutes, 10),
+                            parseInt(seconds, 10)
+                        ));
+                        console.log('Parsed date from string with UTC preservation:', date);
+                    }
+                }
+                
+                // Add to timeline if we have a valid date
+                if (date && !isNaN(date.getTime())) {
+                    hasData = true;
+                    items.push({
+                        id: items.length + 1,
+                        content: 'Domain first registered',
+                        start: date,
+                        className: 'timeline-rdap',
+                        group: 'rdap',
+                        title: `Domain Registration<br>${item.registered || item.last_modified}`
+                    });
+                    console.log('Added registration event to timeline with date:', date);
+                } else {
+                    console.error('Failed to get a valid date for registration event');
                 }
             }
-
-            // Only create timeline if we have data
-            if (hasData && items.length > 0) {
-                console.log('Adding items to timeline:', items);
+            
+            // Handle update events
+            if (item.type === 'Updated' && !item.error) {
+                let date = null;
                 
+                // First try to use the _updated_dt field directly
+                if (item._updated_dt) {
+                    console.log('Using _updated_dt field directly:', item._updated_dt);
+                    date = new Date(item._updated_dt);
+                    if (isNaN(date.getTime())) {
+                        console.error('Invalid date from _updated_dt:', item._updated_dt);
+                        date = null;
+                    }
+                }
+                
+                // Fallback: If _updated_dt is missing or invalid, use the string but preserve timezone
+                if (!date && (item.updated || item.last_modified)) {
+                    console.log('Falling back to string date:', item.updated || item.last_modified);
+                    
+                    // Direct handling for our specific format "DD-MM-YYYY HH:MM:SS UTC"
+                    const dateStr = item.updated || item.last_modified;
+                    const dateRegex = /^(\d{2})-(\d{2})-(\d{4})\s(\d{2}):(\d{2}):(\d{2})\s+UTC$/;
+                    const match = dateStr.match(dateRegex);
+                    
+                    if (match) {
+                        const [_, day, month, year, hours, minutes, seconds] = match;
+                        date = new Date(Date.UTC(
+                            parseInt(year, 10),
+                            parseInt(month, 10) - 1,
+                            parseInt(day, 10),
+                            parseInt(hours, 10),
+                            parseInt(minutes, 10),
+                            parseInt(seconds, 10)
+                        ));
+                        console.log('Parsed date from string with UTC preservation:', date);
+                    }
+                }
+                
+                // Add to timeline if we have a valid date
+                if (date && !isNaN(date.getTime())) {
+                    hasData = true;
+                    items.push({
+                        id: items.length + 1,
+                        content: 'Domain registration updated',
+                        start: date,
+                        className: 'timeline-rdap',
+                        group: 'rdap',
+                        title: `Domain Update<br>${item.updated || item.last_modified}`
+                    });
+                    console.log('Added update event to timeline with date:', date);
+                } else {
+                    console.error('Failed to get a valid date for update event');
+                }
+            }
+        });
+
+        // Only create timeline if we have data
+        if (hasData && items.length > 0) {
+            console.log('Adding items to timeline:', JSON.stringify(items, null, 2));
+            
+            try {
                 // Create a new DataSet with the items
                 timelineItems = new vis.DataSet(items);
                 
@@ -533,427 +678,452 @@
                     timeline.setItems(timelineItems);
                 }
 
-                // Set window to show all items
-                const dates = items.map(item => new Date(item.start));
-                if (dates.length > 0) {
-                    const minDate = new Date(Math.min(...dates));
-                    const maxDate = new Date(Math.max(...dates));
-                    const timeSpan = maxDate - minDate;
-                    const padding = timeSpan * 0.1;
-                    
-                    timeline.setWindow(
-                        new Date(minDate.getTime() - padding),
-                        new Date(maxDate.getTime() + padding)
-                    );
-                }
-
+                // After setting items, ensure all events are visible
+                timeline.fit({ animation: { duration: 1000, easingFunction: 'easeInOutQuad' }});
+                
                 timelineContainer.style.display = 'block';
-                timelineButtonContainer.style.display = 'block';
-                updateTimelineVisibility();
-            } else {
-                console.log('No data to display in timeline');
-                timelineContainer.style.display = 'none';
-                timelineButtonContainer.style.display = 'none';
+            } catch (e) {
+                console.error('Error creating timeline:', e);
             }
+        } else {
+            console.log('No data to display in timeline. hasData:', hasData, 'items.length:', items.length);
+            timelineContainer.style.display = 'none';
         }
+    }
+    
+    function updateTimelineVisibility() {
+        const showRdap = document.getElementById('showRdap').checked;
+        const showCerts = document.getElementById('showCerts').checked;
+        const showHeaders = document.getElementById('showHeaders').checked;
         
-        function updateTimelineVisibility() {
-            const showRdap = document.getElementById('showRdap').checked;
-            const showCerts = document.getElementById('showCerts').checked;
-            const showHeaders = document.getElementById('showHeaders').checked;
-            
-            let visibleItems = [];
-            
-            timelineItems.forEach(item => {
-                if ((item.group === 'rdap' && showRdap) ||
-                    (item.group === 'certs' && showCerts) ||
-                    (item.group === 'headers' && showHeaders)) {
-                    visibleItems.push(item);
-                }
-            });
-            
-            if (timeline) {
-                timeline.setItems(new vis.DataSet(visibleItems));
-            }
-        }
+        let visibleItems = [];
         
-        // Add event listeners for checkboxes
-        document.getElementById('showRdap').addEventListener('change', updateTimelineVisibility);
-        document.getElementById('showCerts').addEventListener('change', updateTimelineVisibility);
-        document.getElementById('showHeaders').addEventListener('change', updateTimelineVisibility);
-        
-        // Form submission handler
-        searchForm.addEventListener('submit', async function(event) {
-            event.preventDefault();
-            console.log('Form submitted');
-            
-            const urlInput = document.getElementById('url');
-            const url = urlInput.value;
-            const searchType = document.querySelector('input[name="searchType"]:checked').value;
-            
-            // Set the analyzed URL in the results title
-            document.getElementById('analyzed-url').textContent = url;
-            
-            console.log('URL:', url);
-            console.log('Search Type:', searchType);
-            
-            // Show spinner and hide previous results/errors
-            spinner.style.display = 'block';
-            if (results) results.style.display = 'none';
-            if (errorDiv) errorDiv.classList.add('d-none');
-
-            // Clean up existing DataTables instances
-            if ($.fn.DataTable.isDataTable('#domain-table')) {
-                $('#domain-table').DataTable().destroy();
-            }
-            if ($.fn.DataTable.isDataTable('#headers-table')) {
-                $('#headers-table').DataTable().destroy();
-            }
-            
-            // Clear all previous results and reset displays
-            document.getElementById('domain-results').innerHTML = '';
-            document.getElementById('headers-results').innerHTML = '';
-            document.getElementById('ssl-certificate-results').innerHTML = '';
-            document.getElementById('domain-info').style.display = 'none';
-            document.getElementById('headers-info').style.display = 'none';
-            document.getElementById('ssl-certificate').style.display = 'none';
-            document.getElementById('timeline').style.display = 'none';
-            
-            // Clear timeline if it exists
-            if (timeline) {
-                timelineItems.clear();
-            }
-
-            try {
-                console.log('Sending request...');
-                const response = await fetch('/analyze', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        url: url,
-                        searchType: searchType
-                    })
-                });
-
-                console.log('Response received:', response.status);
-                
-                if (!response.ok) {
-                    const errorData = await response.json();
-                    throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
-                }
-
-                const data = await response.json();
-                console.log('Data received:', data);
-                
-                // Create timeline and update checkboxes
-                createTimeline(data);
-                
-                // Show results based on search type
-                if (searchType === 'all') {
-                    if (data.rdap && data.rdap.length > 0) {
-                        document.getElementById('domain-info').style.display = 'block';
-                        displayDomainResults(data.rdap);
-                    }
-                    if (data.headers && data.headers.length > 0) {
-                        document.getElementById('headers-info').style.display = 'block';
-                        displayHeadersResults(data.headers);
-                    }
-                    if (data.certs) {
-                        document.getElementById('ssl-certificate').style.display = 'block';
-                        displayCertificateResults(data.certs);
-                    }
-                } else if (searchType === 'rdap' && data) {
-                    document.getElementById('domain-info').style.display = 'block';
-                    displayDomainResults(data);
-                } else if (searchType === 'headers' && data) {
-                    document.getElementById('headers-info').style.display = 'block';
-                    displayHeadersResults(data);
-                } else if (searchType === 'certs' && data) {
-                    document.getElementById('ssl-certificate').style.display = 'block';
-                    displayCertificateResults(data);
-                }
-                
-                results.style.display = 'block';
-                
-            } catch (error) {
-                console.error('Error:', error);
-                errorDiv.textContent = error.message;
-                errorDiv.classList.remove('d-none');
-            } finally {
-                spinner.style.display = 'none';
+        timelineItems.forEach(item => {
+            if ((item.group === 'rdap' && showRdap) ||
+                (item.group === 'certs' && showCerts) ||
+                (item.group === 'headers' && showHeaders)) {
+                visibleItems.push(item);
             }
         });
-    });
-
-    function displayDomainResults(data) {
-        const tbody = document.getElementById('domain-results');
-        tbody.innerHTML = '';
         
-        if (!data || !data.length) return;
-
-        // Check if the response contains an error
-        if (data[0].error) {
-            const row = document.createElement('tr');
-            row.innerHTML = `
-                <td colspan="3" class="text-danger">
-                    <i class="bi bi-exclamation-triangle-fill me-2"></i>
-                    ${data[0].error}
-                </td>
-            `;
-            tbody.appendChild(row);
-            return;
+        if (timeline) {
+            timeline.setItems(new vis.DataSet(visibleItems));
         }
+    }
+    
+    // Add event listeners for checkboxes
+    document.getElementById('showRdap').addEventListener('change', updateTimelineVisibility);
+    document.getElementById('showCerts').addEventListener('change', updateTimelineVisibility);
+    document.getElementById('showHeaders').addEventListener('change', updateTimelineVisibility);
+    
+    // Form submission handler
+    searchForm.addEventListener('submit', async function(event) {
+        event.preventDefault();
+        console.log('Form submitted');
+        
+        const urlInput = document.getElementById('url');
+        const url = urlInput.value;
+        const searchType = document.querySelector('input[name="searchType"]:checked').value;
+        
+        // Set the analyzed URL in the results title
+        document.getElementById('analyzed-url').textContent = url;
+        
+        console.log('URL:', url);
+        console.log('Search Type:', searchType);
+        
+        // Show spinner and hide previous results/errors
+        spinner.style.display = 'block';
+        if (results) results.style.display = 'none';
+        if (errorDiv) errorDiv.classList.add('d-none');
 
-        // Destroy existing DataTable if it exists
+        // Clean up existing DataTables instances
         if ($.fn.DataTable.isDataTable('#domain-table')) {
             $('#domain-table').DataTable().destroy();
         }
-
-        // Display the data
-        data.forEach(item => {
-            // Parse the date string into a timestamp for sorting
-            const [date, time] = item.last_modified.split(' ');
-            const [day, month, year] = date.split('-');
-            const timestamp = new Date(`${year}-${month}-${day} ${time}`).getTime();
-            
-            const row = document.createElement('tr');
-            row.innerHTML = `
-                <td>${item.type}</td>
-                <td><a href="${item.url}" target="_blank">${item.url}</a></td>
-                <td data-order="${timestamp}">${item.last_modified}</td>
-            `;
-            tbody.appendChild(row);
-        });
-
-        // Initialize DataTable with sorting
-        $('#domain-table').DataTable({
-            order: [[2, 'asc']], // Sort by time column ascending by default (oldest first)
-            columnDefs: [{
-                targets: 2,
-                type: 'num'  // Use numeric sorting for timestamps
-            }]
-        });
-    }
-
-    function displayHeadersResults(data) {
-        const tbody = document.getElementById('headers-results');
-        const filterValue = document.getElementById('type-filter').value;
-        tbody.innerHTML = '';
-        
-        if (!data || !data.length) return;
-
-        // Store the data for filtering
-        window.headerResults = data;
-
-        // Destroy existing DataTable if it exists
         if ($.fn.DataTable.isDataTable('#headers-table')) {
             $('#headers-table').DataTable().destroy();
         }
-
-        let filteredResults = [...data];
-        if (filterValue !== 'all') {
-            filteredResults = filteredResults.filter(item => 
-                item.type.toLowerCase() === filterValue.toLowerCase()
-            );
-        }
-
-        // Display the data
-        filteredResults.forEach(item => {
-            // Parse the date string into a timestamp for sorting
-            const [date, time] = item.last_modified.split(' ');
-            const [day, month, year] = date.split('-');
-            const timestamp = new Date(`${year}-${month}-${day} ${time}`).getTime();
-            
-            const row = document.createElement('tr');
-            row.innerHTML = `
-                <td>${item.type}</td>
-                <td><a href="${item.url}" target="_blank">${item.url}</a></td>
-                <td data-order="${timestamp}">${item.last_modified}</td>
-            `;
-            tbody.appendChild(row);
-        });
-
-        // Initialize DataTable with sorting
-        $('#headers-table').DataTable({
-            order: [[2, 'asc']], // Sort by last modified column ascending by default (oldest first)
-            columnDefs: [{
-                targets: 2,
-                type: 'num'  // Use numeric sorting for timestamps
-            }]
-        });
-    }
-
-    function displayCertificateResults(data) {
-        const tbody = document.getElementById('ssl-certificate-results');
-        tbody.innerHTML = '';  // Clear existing results
         
-        if (!data || !Array.isArray(data)) {
-            data = [data];  // Convert single object to array
-        }
+        // Clear all previous results and reset displays
+        document.getElementById('domain-results').innerHTML = '';
+        document.getElementById('headers-results').innerHTML = '';
+        document.getElementById('ssl-certificate-results').innerHTML = '';
+        document.getElementById('domain-info').style.display = 'none';
+        document.getElementById('headers-info').style.display = 'none';
+        document.getElementById('ssl-certificate').style.display = 'none';
+        document.getElementById('timeline').style.display = 'none';
         
-        data.forEach(item => {
-            const row = document.createElement('tr');
-            row.innerHTML = `
-                <td>${item.type}</td>
-                <td>${item['Common Name']}</td>
-                <td>${item['First Seen']}</td>
-                <td>${item['Valid From']}</td>
-                <td><a href="${item['Source']}" target="_blank">View Certificate</a></td>
-            `;
-            tbody.appendChild(row);
-        });
-        
-        document.getElementById('ssl-certificate').style.display = 'block';
-    }
-
-    function filterHeadersResults() {
-        displayHeadersResults(window.headerResults);
-    }
-
-    // Add export functions
-    async function exportTable(type) {
-        const url = document.getElementById('url').value;
-        const domain = url.replace(/^https?:\/\//, '').split('/')[0];
-        let tableData;
-        
-        if (type === 'rdap') {
-            tableData = Array.from(document.getElementById('domain-results').children).map(row => ({
-                type: row.children[0].textContent,
-                url: row.children[1].firstChild.href,
-                last_modified: row.children[2].textContent
-            }));
-        } else if (type === 'certs') {
-            tableData = Array.from(document.getElementById('ssl-certificate-results').children).map(row => ({
-                type: row.children[0].textContent,
-                common_name: row.children[1].textContent,
-                first_seen: row.children[2].textContent,
-                valid_from: row.children[3].textContent,
-                source: row.children[4].firstChild.href
-            }));
-        } else {
-            tableData = Array.from(document.getElementById('headers-results').children).map(row => ({
-                type: row.children[0].textContent,
-                url: row.children[1].firstChild.href,
-                last_modified: row.children[2].textContent
-            }));
+        // Clear timeline if it exists
+        if (timeline) {
+            timelineItems.clear();
         }
 
         try {
-            const response = await fetch(`/export/${type}`, {
+            console.log('Sending request...');
+            const response = await fetch('/analyze', {
                 method: 'POST',
                 headers: {
-                    'Content-Type': 'application/json',
+                    'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({
-                    domain: domain,
-                    table_data: tableData
+                    url: url,
+                    searchType: searchType
                 })
             });
+
+            console.log('Response received:', response.status);
             
-            if (!response.ok) throw new Error('Export failed');
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+            }
+
+            const data = await response.json();
+            console.log('Data received:', data);
             
-            // Get the filename from the Content-Disposition header
-            const contentDisposition = response.headers.get('Content-Disposition');
-            let filename = '';
-            if (contentDisposition && contentDisposition.includes('filename=')) {
-                filename = contentDisposition.split('filename=')[1].replace(/"/g, '');
-            } else {
-                // Fallback filename format
-                const timestamp = new Date().toISOString().slice(0,10).replace(/-/g,'');
-                filename = `${domain}_${timestamp}_${type}.csv`;
+            // Create timeline and update checkboxes
+            createTimeline(data);
+            
+            // Show results based on search type
+            if (searchType === 'all') {
+                if (data.rdap && data.rdap.length > 0) {
+                    document.getElementById('domain-info').style.display = 'block';
+                    displayDomainResults(data.rdap);
+                }
+                if (data.headers && data.headers.length > 0) {
+                    document.getElementById('headers-info').style.display = 'block';
+                    displayHeadersResults(data.headers);
+                }
+                if (data.certs) {
+                    document.getElementById('ssl-certificate').style.display = 'block';
+                    displayCertificateResults(data.certs);
+                }
+            } else if (searchType === 'rdap' && data) {
+                document.getElementById('domain-info').style.display = 'block';
+                displayDomainResults(data);
+            } else if (searchType === 'headers' && data) {
+                document.getElementById('headers-info').style.display = 'block';
+                displayHeadersResults(data);
+            } else if (searchType === 'certs' && data) {
+                document.getElementById('ssl-certificate').style.display = 'block';
+                displayCertificateResults(data);
             }
             
-            const blob = await response.blob();
-            const url = window.URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = filename;
-            document.body.appendChild(a);
-            a.click();
-            window.URL.revokeObjectURL(url);
-            document.body.removeChild(a);
+            results.style.display = 'block';
+            
         } catch (error) {
-            console.error('Export error:', error);
-            alert('Error exporting data');
+            console.error('Error:', error);
+            errorDiv.textContent = error.message;
+            errorDiv.classList.remove('d-none');
+        } finally {
+            spinner.style.display = 'none';
         }
+    });
+});
+
+function displayDomainResults(data) {
+    const tbody = document.getElementById('domain-results');
+    tbody.innerHTML = '';
+    
+    if (!data || !data.length) return;
+
+    // Check if the response contains an error
+    if (data[0].error) {
+        const row = document.createElement('tr');
+        row.innerHTML = `
+            <td colspan="3" class="text-danger">
+                <i class="bi bi-exclamation-triangle-fill me-2"></i>
+                ${data[0].error}
+            </td>
+        `;
+        tbody.appendChild(row);
+        return;
     }
 
-    async function exportAll() {
-        const url = document.getElementById('url').value;
-        const domain = url.replace(/^https?:\/\//, '').split('/')[0];
-        
-        let data = {
-            domain: domain,
-            rdap_data: [],
-            headers_data: [],
-            cert_data: []
-        };
-        
-        // Collect all available data based on what's displayed
-        if (document.getElementById('domain-info').style.display !== 'none') {
-            data.rdap_data = Array.from(document.getElementById('domain-results').children).map(row => ({
-                type: row.children[0].textContent,
-                url: row.children[1].firstChild.href,
-                last_modified: row.children[2].textContent
-            }));
-        }
-        
-        if (document.getElementById('headers-info').style.display !== 'none') {
-            data.headers_data = Array.from(document.getElementById('headers-results').children).map(row => ({
-                type: row.children[0].textContent,
-                url: row.children[1].firstChild.href,
-                last_modified: row.children[2].textContent
-            }));
-        }
-        
-        if (document.getElementById('ssl-certificate').style.display !== 'none') {
-            data.cert_data = Array.from(document.getElementById('ssl-certificate-results').children).map(row => ({
-                type: row.children[0].textContent,
-                common_name: row.children[1].textContent,
-                first_seen: row.children[2].textContent,
-                valid_from: row.children[3].textContent,
-                source: row.children[4].firstChild.href
-            }));
-        }
+    // Destroy existing DataTable if it exists
+    if ($.fn.DataTable.isDataTable('#domain-table')) {
+        $('#domain-table').DataTable().destroy();
+    }
 
-        try {
-            const response = await fetch('/export/all', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify(data)
-            });
-            
-            if (!response.ok) throw new Error('Export failed');
-            
-            // Get the filename from the Content-Disposition header
-            const contentDisposition = response.headers.get('Content-Disposition');
-            let filename = '';
-            if (contentDisposition && contentDisposition.includes('filename=')) {
-                filename = contentDisposition.split('filename=')[1].replace(/"/g, '');
-            } else {
-                // Fallback filename format
-                const timestamp = new Date().toISOString().slice(0,10).replace(/-/g,'');
-                filename = `${domain}_${timestamp}_all.zip`;
+    // Display the data
+    data.forEach(item => {
+        // Get the appropriate date field based on type
+        const dateStr = item.type === 'Registered' ? 
+            (item.registered || item.last_modified) : 
+            (item.updated || item.last_modified);
+        
+        // Parse the date string into a timestamp for sorting
+        const [date, time] = dateStr.split(' ');
+        const [day, month, year] = date.split('-');
+        const timestamp = new Date(`${year}-${month}-${day} ${time}`).getTime();
+        
+        const row = document.createElement('tr');
+        row.innerHTML = `
+            <td>${item.type}</td>
+            <td><a href="${item.url}" target="_blank">${item.url}</a></td>
+            <td data-order="${timestamp}">${dateStr}</td>
+        `;
+        tbody.appendChild(row);
+    });
+
+    // Initialize DataTable with sorting
+    $('#domain-table').DataTable({
+        order: [[2, 'asc']],
+        columnDefs: [{
+            targets: 2,
+            type: 'num'
+        }],
+        language: {
+            paginate: {
+                previous: "Previous",
+                next: "Next"
             }
-            
-            const blob = await response.blob();
-            const url = window.URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = filename;
-            document.body.appendChild(a);
-            a.click();
-            window.URL.revokeObjectURL(url);
-            document.body.removeChild(a);
-        } catch (error) {
-            console.error('Export error:', error);
-            alert('Error exporting data');
-        }
+        },
+        pagingType: "simple",
+        pageLength: 10,
+        lengthMenu: [[10, 25, 50, -1], [10, 25, 50, "All"]]
+    });
+}
+
+function displayHeadersResults(data) {
+    const tbody = document.getElementById('headers-results');
+    const filterValue = document.getElementById('type-filter').value;
+    tbody.innerHTML = '';
+    
+    if (!data || !data.length) return;
+
+    // Store the data for filtering
+    window.headerResults = data;
+
+    // Destroy existing DataTable if it exists
+    if ($.fn.DataTable.isDataTable('#headers-table')) {
+        $('#headers-table').DataTable().destroy();
     }
-    </script>
-</body>
-</html> 
+
+    let filteredResults = [...data];
+    if (filterValue !== 'all') {
+        filteredResults = filteredResults.filter(item => 
+            item.type.toLowerCase() === filterValue.toLowerCase()
+        );
+    }
+
+    // Display the data
+    filteredResults.forEach(item => {
+        // Parse the date string into a timestamp for sorting
+        const [date, time] = item.last_modified.split(' ');
+        const [day, month, year] = date.split('-');
+        const timestamp = new Date(`${year}-${month}-${day} ${time}`).getTime();
+        
+        const row = document.createElement('tr');
+        row.innerHTML = `
+            <td>${item.type}</td>
+            <td><a href="${item.url}" target="_blank">${item.url}</a></td>
+            <td data-order="${timestamp}">${item.last_modified}</td>
+        `;
+        tbody.appendChild(row);
+    });
+
+    // Initialize DataTable with sorting
+    $('#headers-table').DataTable({
+        order: [[2, 'asc']],
+        columnDefs: [{
+            targets: 2,
+            type: 'num'
+        }],
+        language: {
+            paginate: {
+                previous: "Previous",
+                next: "Next"
+            }
+        },
+        pagingType: "simple",
+        pageLength: 10,
+        lengthMenu: [[10, 25, 50, -1], [10, 25, 50, "All"]]
+    });
+}
+
+function displayCertificateResults(data) {
+    const tbody = document.getElementById('ssl-certificate-results');
+    tbody.innerHTML = '';  // Clear existing results
+    
+    if (!data || !Array.isArray(data)) {
+        data = [data];  // Convert single object to array
+    }
+    
+    data.forEach(item => {
+        const row = document.createElement('tr');
+        row.innerHTML = `
+            <td>${item.type}</td>
+            <td>${item['Common Name']}</td>
+            <td>${item['First Seen']}</td>
+            <td>${item['Valid From']}</td>
+            <td><a href="${item['Source']}" target="_blank">View Certificate</a></td>
+        `;
+        tbody.appendChild(row);
+    });
+    
+    document.getElementById('ssl-certificate').style.display = 'block';
+}
+
+function filterHeadersResults() {
+    displayHeadersResults(window.headerResults);
+}
+
+// Add export functions
+async function exportTable(type) {
+    const url = document.getElementById('url').value;
+    const domain = url.replace(/^https?:\/\//, '').split('/')[0];
+    let tableData;
+    
+    if (type === 'rdap') {
+        tableData = Array.from(document.getElementById('domain-results').children).map(row => {
+            // Extract only the type, URL, and time columns
+            const type = row.children[0].textContent;
+            const url = row.children[1].firstChild.href;
+            const time = row.children[2].textContent;
+            
+            return {
+                type: type,
+                url: url,
+                time: time
+            };
+        });
+    } else if (type === 'certs') {
+        tableData = Array.from(document.getElementById('ssl-certificate-results').children).map(row => ({
+            type: row.children[0].textContent,
+            common_name: row.children[1].textContent,
+            first_seen: row.children[2].textContent,
+            valid_from: row.children[3].textContent,
+            source: row.children[4].firstChild.href
+        }));
+    } else {
+        tableData = Array.from(document.getElementById('headers-results').children).map(row => ({
+            type: row.children[0].textContent,
+            url: row.children[1].firstChild.href,
+            last_modified: row.children[2].textContent
+        }));
+    }
+
+    try {
+        const response = await fetch(`/export/${type}`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                domain: domain,
+                table_data: tableData
+            })
+        });
+        
+        if (!response.ok) throw new Error('Export failed');
+        
+        // Get the filename from the Content-Disposition header
+        const contentDisposition = response.headers.get('Content-Disposition');
+        let filename = '';
+        if (contentDisposition && contentDisposition.includes('filename=')) {
+            filename = contentDisposition.split('filename=')[1].replace(/"/g, '');
+        } else {
+            // Fallback filename format
+            const timestamp = new Date().toISOString().slice(0,10).replace(/-/g,'');
+            filename = `${domain}_${timestamp}_${type}.csv`;
+        }
+        
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+    } catch (error) {
+        console.error('Export error:', error);
+        alert('Error exporting data');
+    }
+}
+
+async function exportAll() {
+    const url = document.getElementById('url').value;
+    const domain = url.replace(/^https?:\/\//, '').split('/')[0];
+    
+    let data = {
+        domain: domain,
+        rdap_data: [],
+        headers_data: [],
+        cert_data: []
+    };
+    
+    // Collect all available data based on what's displayed
+    if (document.getElementById('domain-info').style.display !== 'none') {
+        data.rdap_data = Array.from(document.getElementById('domain-results').children).map(row => {
+            // Extract only the type, URL, and time columns
+            const type = row.children[0].textContent;
+            const url = row.children[1].firstChild.href;
+            const time = row.children[2].textContent;
+            
+            return {
+                type: type,
+                url: url,
+                time: time
+            };
+        });
+    }
+    
+    if (document.getElementById('headers-info').style.display !== 'none') {
+        data.headers_data = Array.from(document.getElementById('headers-results').children).map(row => ({
+            type: row.children[0].textContent,
+            url: row.children[1].firstChild.href,
+            last_modified: row.children[2].textContent
+        }));
+    }
+    
+    if (document.getElementById('ssl-certificate').style.display !== 'none') {
+        data.cert_data = Array.from(document.getElementById('ssl-certificate-results').children).map(row => ({
+            type: row.children[0].textContent,
+            common_name: row.children[1].textContent,
+            first_seen: row.children[2].textContent,
+            valid_from: row.children[3].textContent,
+            source: row.children[4].firstChild.href
+        }));
+    }
+
+    try {
+        const response = await fetch('/export/all', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(data)
+        });
+        
+        if (!response.ok) throw new Error('Export failed');
+        
+        // Get the filename from the Content-Disposition header
+        const contentDisposition = response.headers.get('Content-Disposition');
+        let filename = '';
+        if (contentDisposition && contentDisposition.includes('filename=')) {
+            filename = contentDisposition.split('filename=')[1].replace(/"/g, '');
+        } else {
+            // Fallback filename format
+            const timestamp = new Date().toISOString().slice(0,10).replace(/-/g,'');
+            filename = `${domain}_${timestamp}_all.zip`;
+        }
+        
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+    } catch (error) {
+        console.error('Export error:', error);
+        alert('Error exporting data');
+    }
+}
+</script>
+{% endblock %} 

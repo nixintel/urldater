@@ -149,7 +149,7 @@ def get_first_certificate(domain):
     logging.debug("Chrome options configured")
     
     max_retries = 3
-    timeout = 30  # Increased timeout to 30 seconds
+    timeout = 45  # Increased timeout to 45 seconds for better loading
     
     try:
         service = Service()
@@ -166,17 +166,46 @@ def get_first_certificate(domain):
                 logging.debug(f"Accessing URL: {url}")
                 driver.get(url)
                 
-                # Wait for the table to load with a more specific selector
+                # Wait for initial table to load with a more specific selector
                 logging.debug("Waiting for table to load...")
                 try:
                     # Wait for a table with multiple rows (typical for certificate data)
                     WebDriverWait(driver, timeout).until(
                         lambda d: len(d.find_elements(By.TAG_NAME, "tr")) > 1
                     )
-                    logging.debug("Table loaded successfully")
+                    logging.debug("Initial table loaded successfully")
                 except TimeoutException:
-                    logging.warning("Timeout waiting for table rows")
+                    logging.warning("Timeout waiting for initial table rows")
                     raise
+                
+                # Ensure the entire page is loaded by scrolling down gradually
+                logging.debug("Scrolling to ensure all content is loaded...")
+                
+                # Get initial table size
+                initial_rows = len(driver.find_elements(By.TAG_NAME, "tr"))
+                logging.debug(f"Initial row count: {initial_rows}")
+                
+                # Scroll down gradually to trigger any lazy loading
+                last_height = driver.execute_script("return document.body.scrollHeight")
+                while True:
+                    # Scroll down to bottom
+                    driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                    
+                    # Wait to load page
+                    time.sleep(2)
+                    
+                    # Calculate new scroll height and compare with last scroll height
+                    new_height = driver.execute_script("return document.body.scrollHeight")
+                    if new_height == last_height:
+                        break
+                    last_height = new_height
+                
+                # Check if more rows loaded after scrolling
+                final_rows = len(driver.find_elements(By.TAG_NAME, "tr"))
+                logging.debug(f"Final row count after scrolling: {final_rows}")
+                
+                # Extra delay to ensure everything is rendered
+                time.sleep(3)
                 
                 # Get the page source and parse it
                 html_content = driver.page_source

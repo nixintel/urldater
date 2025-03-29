@@ -101,8 +101,9 @@ def get_domain_info(url):
                                 entry = {
                                     'type': 'Registered',
                                     'url': rdap_url,  # Using RDAP URL instead of domain tools
+                                    'registered': formatted_date,
                                     'last_modified': formatted_date,
-                                    '_last_modified_dt': parsed_date
+                                    '_registered_dt': parsed_date
                                 }
                                 logging.debug(f"Adding registration entry: {entry}")
                                 domain_info.append(entry)
@@ -110,8 +111,9 @@ def get_domain_info(url):
                                 entry = {
                                     'type': 'Updated',
                                     'url': rdap_url,  # Using RDAP URL instead of domain tools
+                                    'updated': formatted_date,
                                     'last_modified': formatted_date,
-                                    '_last_modified_dt': parsed_date
+                                    '_updated_dt': parsed_date
                                 }
                                 logging.debug(f"Adding last changed entry: {entry}")
                                 domain_info.append(entry)
