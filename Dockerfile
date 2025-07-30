@@ -51,5 +51,14 @@ COPY . .
 # Expose the port the app runs on
 EXPOSE 5000
 
-# Command to run the application using gunicorn
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "4", "app:app"]
+# Command to run the application using gunicorn with optimized settings for Selenium
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", \
+     "--workers", "2", \
+     "--timeout", "120", \
+     "--graceful-timeout", "60", \
+     "--max-requests", "1000", \
+     "--max-requests-jitter", "50", \
+     "--worker-class", "sync", \
+     "--preload", \
+     "--worker-tmp-dir", "/dev/shm", \
+     "app:app"]
