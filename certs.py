@@ -131,6 +131,34 @@ def parse_certificate_data(html_content):
         logging.error(f"Error parsing certificate data: {str(e)}")
         return None
 
+def check_crtsh_status(driver, timeout=10):
+    """
+    Check if crt.sh is responding and not showing a server error.
+    Returns tuple of (is_up, error_message)
+    """
+    try:
+        driver.set_page_load_timeout(timeout)
+        driver.get("https://crt.sh")
+        
+        # Check for common server error indicators
+        error_texts = [
+            "502 Bad Gateway",
+            "503 Service Temporarily Unavailable",
+            "504 Gateway Time-out",
+            "500 Internal Server Error",
+            "Database connection failed"
+        ]
+        
+        page_source = driver.page_source.lower()
+        for error in error_texts:
+            if error.lower() in page_source:
+                return False, f"crt.sh is experiencing issues: {error}"
+        
+        return True, None
+        
+    except Exception as e:
+        return False, f"crt.sh appears to be down: {str(e)}"
+
 def get_first_certificate(domain):
     """
     Connect to crt.sh and attempt to retrieve certificate information.
@@ -160,8 +188,19 @@ def get_first_certificate(domain):
             try:
                 logging.debug(f"Attempt {attempt + 1}/{max_retries} to get certificate data")
                 driver = webdriver.Chrome(service=service, options=chrome_options)
-                driver.set_page_load_timeout(timeout)
                 
+                # Check if crt.sh is up and responding
+                is_up, error_message = check_crtsh_status(driver)
+                if not is_up:
+                    logging.error(error_message)
+                    return False, {
+                        'type': 'SSL Certificate',
+                        'error': error_message,
+                        'status': 'Service Unavailable',
+                        'message': 'The certificate data could not be retrieved because crt.sh is currently experiencing issues. Please try again later.'
+                    }
+                
+                driver.set_page_load_timeout(timeout)
                 url = f"https://crt.sh/?q={domain}"
                 logging.debug(f"Accessing URL: {url}")
                 driver.get(url)
@@ -226,16 +265,41 @@ def get_first_certificate(domain):
                 error_msg = f"Timeout error on attempt {attempt + 1}/{max_retries}: {str(e)}"
                 logging.warning(f"crt.sh timeout for {domain}: {error_msg}")
                 if attempt == max_retries - 1:
-                    return False, error_msg
+                    return False, {
+                        'type': 'SSL Certificate',
+                        'error': error_msg,
+                        'status': 'Timeout',
+                        'message': 'Unable to connect to crt.sh to retrieve certificate history. The site may be offline.'
+                    }
                 time.sleep(2)
                 
             except WebDriverException as e:
                 error_msg = f"Browser error: {str(e)}"
                 logging.error(f"crt.sh browser error for {domain}: {error_msg}")
+                
+                # Check for specific error types
                 if "chromedriver" in str(e).lower():
-                    return False, "ChromeDriver error: Please ensure Chrome and ChromeDriver are properly installed"
+                    return False, {
+                        'type': 'SSL Certificate',
+                        'error': error_msg,
+                        'status': 'Configuration Error',
+                        'message': 'ChromeDriver error: Please ensure Chrome and ChromeDriver are properly installed'
+                    }
+                elif any(error in str(e).lower() for error in ['502', '503', '504', '500', 'gateway']):
+                    return False, {
+                        'type': 'SSL Certificate',
+                        'error': error_msg,
+                        'status': 'Service Unavailable',
+                        'message': 'Unable to connect to crt.sh to retrieve certificate history. The site may be offline.'
+                    }
+                
                 if attempt == max_retries - 1:
-                    return False, error_msg
+                    return False, {
+                        'type': 'SSL Certificate',
+                        'error': error_msg,
+                        'status': 'Error',
+                        'message': 'An error occurred while trying to retrieve certificate data. Please try again later.'
+                    }
                 time.sleep(2)
                 
             finally:

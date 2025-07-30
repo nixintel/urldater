@@ -5,27 +5,36 @@ FROM python:3.11-slim
 ENV PYTHONUNBUFFERED=1 \
     DEBIAN_FRONTEND=noninteractive
 
-# Install system dependencies
+# Install system dependencies and Google Chrome
 RUN apt-get update && apt-get install -y \
     wget \
     gnupg \
-    unzip \
-    curl \
-    && wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add - \
-    && echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google.list \
+    golang \
+    git \
+    && wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg \
+    && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome.gpg] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list \
     && apt-get update \
     && apt-get install -y \
-    google-chrome-stable \
+        google-chrome-stable \
+        xvfb \
+        unzip \
+        curl \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Chrome Driver
-RUN CHROME_VERSION=$(google-chrome-stable --version | awk '{print $3}' | awk -F'.' '{print $1}') \
-    && CHROMEDRIVER_VERSION=$(curl -sS "https://chromedriver.storage.googleapis.com/LATEST_RELEASE_${CHROME_VERSION}") \
-    && wget -q -O /tmp/chromedriver.zip https://chromedriver.storage.googleapis.com/$CHROMEDRIVER_VERSION/chromedriver_linux64.zip \
-    && unzip /tmp/chromedriver.zip -d /usr/bin/ \
-    && rm /tmp/chromedriver.zip \
-    && chmod +x /usr/bin/chromedriver
+# Install OpenRDAP
+RUN go install github.com/openrdap/rdap/cmd/rdap@latest \
+    && mv /root/go/bin/rdap /usr/local/bin/ \
+    && chmod +x /usr/local/bin/rdap
+
+# Install ChromeDriver
+RUN CHROME_VERSION=$(google-chrome-stable --version | awk '{print $3}') \
+    && wget -q https://storage.googleapis.com/chrome-for-testing-public/$CHROME_VERSION/linux64/chromedriver-linux64.zip -O /tmp/chromedriver.zip \
+    && unzip /tmp/chromedriver.zip -d /tmp/ \
+    && mv /tmp/chromedriver-linux64/chromedriver /usr/bin/chromedriver \
+    && chmod +x /usr/bin/chromedriver \
+    && rm -rf /tmp/chromedriver* \
+    && ln -sf /usr/bin/chromedriver /usr/local/bin/chromedriver
 
 # Create and set the working directory
 WORKDIR /app

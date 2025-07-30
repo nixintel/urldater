@@ -121,8 +121,9 @@ document.addEventListener('DOMContentLoaded', function() {
                     document.getElementById('headers-info').style.display = 'block';
                     displayHeadersResults(data.headers);
                 }
+                // Always show certificate section in 'all' mode, even for errors
+                document.getElementById('ssl-certificate').style.display = 'block';
                 if (data.certs) {
-                    document.getElementById('ssl-certificate').style.display = 'block';
                     displayCertificateResults(data.certs);
                 }
             } else if (searchType === 'rdap' && data) {

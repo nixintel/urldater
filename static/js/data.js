@@ -124,21 +124,50 @@ function displayCertificateResults(data) {
     const tbody = document.getElementById('ssl-certificate-results');
     tbody.innerHTML = '';  // Clear existing results
     
-    if (!data || !Array.isArray(data)) {
+    // Handle no data case
+    if (!data) {
+        const row = document.createElement('tr');
+        row.innerHTML = `
+            <td colspan="5" class="text-warning">
+                <div class="alert alert-warning mb-0">
+                    <i class="bi bi-exclamation-triangle-fill me-2"></i>
+                    <strong>Certificate Service Notice:</strong> Unable to connect to crt.sh to retrieve certificate history. The site may be offline.
+                </div>
+            </td>
+        `;
+        tbody.appendChild(row);
+        return;
+    }
+
+    if (!Array.isArray(data)) {
         data = [data];  // Convert single object to array
     }
     
-    data.forEach(item => {
+    // Check if the response contains an error message
+    if (data[0].status === 'Service Unavailable' || data[0].error) {
         const row = document.createElement('tr');
         row.innerHTML = `
-            <td>${item.type}</td>
-            <td>${item['Common Name']}</td>
-            <td>${item['First Seen']}</td>
-            <td>${item['Valid From']}</td>
-            <td><a href="${item['Source']}" target="_blank">View Certificate</a></td>
+            <td colspan="5" class="text-warning">
+                <div class="alert alert-warning mb-0">
+                    <i class="bi bi-exclamation-triangle-fill me-2"></i>
+                    <strong>Certificate Service Notice:</strong> ${data[0].message || data[0].error}
+                </div>
+            </td>
         `;
         tbody.appendChild(row);
-    });
+    } else {
+        data.forEach(item => {
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td>${item.type}</td>
+                <td>${item['Common Name']}</td>
+                <td>${item['First Seen']}</td>
+                <td>${item['Valid From']}</td>
+                <td><a href="${item['Source']}" target="_blank">View Certificate</a></td>
+            `;
+            tbody.appendChild(row);
+        });
+    }
     
     document.getElementById('ssl-certificate').style.display = 'block';
 }
