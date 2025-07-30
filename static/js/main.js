@@ -113,18 +113,30 @@ document.addEventListener('DOMContentLoaded', function() {
             
             // Show results based on search type
             if (searchType === 'all') {
-                if (data.rdap && data.rdap.length > 0) {
-                    document.getElementById('domain-info').style.display = 'block';
+                // Always show all sections in 'all' mode
+                document.getElementById('domain-info').style.display = 'block';
+                document.getElementById('headers-info').style.display = 'block';
+                document.getElementById('ssl-certificate').style.display = 'block';
+
+                // Handle RDAP results
+                if (data.rdap) {
                     displayDomainResults(data.rdap);
                 }
-                if (data.headers && data.headers.length > 0) {
-                    document.getElementById('headers-info').style.display = 'block';
+
+                // Handle Headers results
+                if (data.headers) {
                     displayHeadersResults(data.headers);
                 }
-                // Always show certificate section in 'all' mode, even for errors
-                document.getElementById('ssl-certificate').style.display = 'block';
-                if (data.certs) {
+
+                // Handle Certificate results
+                if (data.certs && Array.isArray(data.certs) && data.certs.length > 0) {
                     displayCertificateResults(data.certs);
+                } else if (data.certs && data.certs.error) {
+                    // Handle error object from crt.sh
+                    displayCertificateResults([data.certs]);
+                } else {
+                    // Handle case where certs data is missing or empty
+                    displayCertificateResults(null);
                 }
             } else if (searchType === 'rdap' && data) {
                 document.getElementById('domain-info').style.display = 'block';

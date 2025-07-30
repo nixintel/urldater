@@ -180,13 +180,20 @@ def get_first_certificate(domain):
     timeout = 45  # Increased timeout to 45 seconds for better loading
     
     try:
-        service = Service()
-        logging.debug("Chrome service initialized")
-        
         for attempt in range(max_retries):
             driver = None
+            service = None
             try:
                 logging.debug(f"Attempt {attempt + 1}/{max_retries} to get certificate data")
+                
+                # Create a new service for each attempt
+                service = Service()
+                logging.debug("Chrome service initialized")
+                
+                # Add a small delay between attempts
+                if attempt > 0:
+                    time.sleep(5)
+                
                 driver = webdriver.Chrome(service=service, options=chrome_options)
                 
                 # Check if crt.sh is up and responding
@@ -197,7 +204,7 @@ def get_first_certificate(domain):
                         'type': 'SSL Certificate',
                         'error': error_message,
                         'status': 'Service Unavailable',
-                        'message': 'The certificate data could not be retrieved because crt.sh is currently experiencing issues. Please try again later.'
+                        'message': 'Unable to connect to crt.sh to retrieve certificate history. The site may be offline.'
                     }
                 
                 driver.set_page_load_timeout(timeout)
@@ -303,18 +310,40 @@ def get_first_certificate(domain):
                 time.sleep(2)
                 
             finally:
+                # Clean up resources
                 if driver:
                     try:
                         driver.quit()
+                        time.sleep(1)  # Give time for cleanup
                     except Exception as e:
                         logging.warning(f"Error closing browser: {str(e)}")
+                    finally:
+                        driver = None
+                
+                if service:
+                    try:
+                        service.stop()
+                    except Exception as e:
+                        logging.warning(f"Error stopping service: {str(e)}")
+                    finally:
+                        service = None
     
     except Exception as e:
         error_msg = f"Unexpected error: {str(e)}"
         logging.error(f"Unexpected error getting certificate data: {error_msg}")
-        return False, error_msg
+        return False, {
+            'type': 'SSL Certificate',
+            'error': error_msg,
+            'status': 'Error',
+            'message': 'Unable to connect to crt.sh to retrieve certificate history. The site may be offline.'
+        }
     
-    return False, f"Failed after {max_retries} attempts"
+    return False, {
+        'type': 'SSL Certificate',
+        'error': f"Failed after {max_retries} attempts",
+        'status': 'Error',
+        'message': 'Unable to connect to crt.sh to retrieve certificate history. The site may be offline.'
+    }
 
 def get_certificate_data(domain):
     # Your existing certificate fetching code
