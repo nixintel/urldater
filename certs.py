@@ -131,14 +131,23 @@ def parse_certificate_data(html_content):
         logging.error(f"Error parsing certificate data: {str(e)}")
         return None
 
-def check_crtsh_status(driver, timeout=10):
+def check_crtsh_status(driver, timeout=30):
     """
     Check if crt.sh is responding and not showing a server error.
     Returns tuple of (is_up, error_message)
     """
     try:
-        driver.set_page_load_timeout(timeout)
-        driver.get("https://crt.sh")
+        # First try a quick check with shorter timeout
+        driver.set_page_load_timeout(10)
+        try:
+            driver.get("https://crt.sh")
+        except Exception:
+            # If quick check fails, try again with longer timeout
+            driver.set_page_load_timeout(timeout)
+            try:
+                driver.get("https://crt.sh")
+            except Exception as e:
+                return False, f"crt.sh is responding too slowly or may be offline: {str(e)}"
         
         # Check for common server error indicators
         error_texts = [
@@ -146,9 +155,18 @@ def check_crtsh_status(driver, timeout=10):
             "503 Service Temporarily Unavailable",
             "504 Gateway Time-out",
             "500 Internal Server Error",
-            "Database connection failed"
+            "Database connection failed",
+            "Too Many Requests"
         ]
         
+        try:
+            # Use WebDriverWait to check for page load
+            WebDriverWait(driver, 5).until(
+                lambda d: len(d.page_source) > 0
+            )
+        except TimeoutException:
+            return False, "crt.sh page load timeout"
+            
         page_source = driver.page_source.lower()
         for error in error_texts:
             if error.lower() in page_source:
@@ -172,6 +190,12 @@ def get_first_certificate(domain):
     chrome_options.add_argument('--disable-dev-shm-usage')
     chrome_options.add_argument('--disable-gpu')
     chrome_options.add_argument('--window-size=1920,1080')
+    chrome_options.add_argument('--disable-web-security')
+    chrome_options.add_argument('--ignore-certificate-errors')
+    chrome_options.add_argument('--disable-extensions')
+    chrome_options.add_argument('--dns-prefetch-disable')
+    chrome_options.add_argument('--disable-features=VizDisplayCompositor')
+    chrome_options.page_load_strategy = 'eager'  # Don't wait for all resources
     
     # Add more detailed logging
     logging.debug("Chrome options configured")
@@ -196,6 +220,9 @@ def get_first_certificate(domain):
                 
                 driver = webdriver.Chrome(service=service, options=chrome_options)
                 
+                # Set initial shorter timeout for quick checks
+                driver.set_page_load_timeout(20)
+                
                 # Check if crt.sh is up and responding
                 is_up, error_message = check_crtsh_status(driver)
                 if not is_up:
@@ -207,21 +234,52 @@ def get_first_certificate(domain):
                         'message': 'Unable to connect to crt.sh to retrieve certificate history. The site may be offline.'
                     }
                 
+                # If initial check passed, set longer timeout for actual query
                 driver.set_page_load_timeout(timeout)
                 url = f"https://crt.sh/?q={domain}"
                 logging.debug(f"Accessing URL: {url}")
-                driver.get(url)
+                
+                try:
+                    driver.get(url)
+                except TimeoutException:
+                    logging.warning("Initial quick attempt timed out, trying with longer timeout")
+                    # If quick attempt fails, try one more time with full timeout
+                    try:
+                        driver.get(url)
+                    except TimeoutException as e:
+                        return False, {
+                            'type': 'SSL Certificate',
+                            'error': str(e),
+                            'status': 'Timeout',
+                            'message': 'Unable to retrieve certificate data. The crt.sh website is responding too slowly.'
+                        }
                 
                 # Wait for initial table to load with a more specific selector
                 logging.debug("Waiting for table to load...")
                 try:
-                    # Wait for a table with multiple rows (typical for certificate data)
-                    WebDriverWait(driver, timeout).until(
-                        lambda d: len(d.find_elements(By.TAG_NAME, "tr")) > 1
+                    # First wait for any table to appear
+                    WebDriverWait(driver, 10).until(
+                        EC.presence_of_element_located((By.TAG_NAME, "table"))
                     )
-                    logging.debug("Initial table loaded successfully")
-                except TimeoutException:
-                    logging.warning("Timeout waiting for initial table rows")
+                    logging.debug("Table element found")
+
+                    # Then wait for rows to be present
+                    WebDriverWait(driver, timeout).until(
+                        lambda d: len(d.find_elements(By.TAG_NAME, "tr")) > 0
+                    )
+                    logging.debug("Table rows found")
+
+                    # Finally wait for actual content
+                    WebDriverWait(driver, timeout).until(
+                        lambda d: any(
+                            cell.text.strip() 
+                            for row in d.find_elements(By.TAG_NAME, "tr") 
+                            for cell in row.find_elements(By.TAG_NAME, "td")
+                        )
+                    )
+                    logging.debug("Table content loaded successfully")
+                except TimeoutException as e:
+                    logging.warning(f"Timeout waiting for table content: {str(e)}")
                     raise
                 
                 # Ensure the entire page is loaded by scrolling down gradually
