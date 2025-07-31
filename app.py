@@ -320,6 +320,22 @@ def about():
         app.logger.error(f"Error rendering about page: {str(e)}")
         return f"Error loading about page: {str(e)}", 500
 
+@app.route('/faq')
+def faq():
+    try:
+        # Read the markdown file
+        md_path = os.path.join(app.root_path, 'templates', 'faq.md')
+        with open(md_path, 'r') as f:
+            content = f.read()
+            
+        # Convert markdown to HTML
+        html_content = markdowner.convert(content)
+        
+        return render_template('faq.html', content=html_content)
+    except Exception as e:
+        app.logger.error(f"Error rendering FAQ page: {str(e)}")
+        return f"Error loading FAQ page: {str(e)}", 500
+
 def create_chrome_driver():
     from selenium.webdriver.chrome.service import Service
     from webdriver_manager.chrome import ChromeDriverManager
