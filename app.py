@@ -70,22 +70,55 @@ async def analyze():
             # Handle different search types
             if search_type == 'all':
                 logging.debug("Getting all data types...")
+                
                 # Get RDAP data
-                rdap_results = get_domain_info(url)
-                if rdap_results:
-                    all_results['rdap'] = rdap_results
+                try:
+                    rdap_results = get_domain_info(url)
+                    all_results['rdap'] = rdap_results if rdap_results else [{
+                        'type': 'Error',
+                        'error': 'No RDAP data could be found for this domain.'
+                    }]
+                except Exception as e:
+                    logging.error(f"Error getting RDAP data: {str(e)}")
+                    all_results['rdap'] = [{
+                        'type': 'Error',
+                        'error': f'Error retrieving RDAP data: {str(e)}'
+                    }]
                 
                 # Get Headers data
-                headers_results = await get_media_dates(url)
-                if headers_results:
-                    all_results['headers'] = headers_results
+                try:
+                    headers_results = await get_media_dates(url)
+                    all_results['headers'] = headers_results if headers_results else [{
+                        'type': 'Error',
+                        'error': 'No header data could be found.'
+                    }]
+                except Exception as e:
+                    logging.error(f"Error getting headers data: {str(e)}")
+                    all_results['headers'] = [{
+                        'type': 'Error',
+                        'error': f'Error retrieving header data: {str(e)}'
+                    }]
                 
                 # Get Certificate data
-                success, cert_data = get_first_certificate(domain)
-                if success and cert_data:
-                    all_results['certs'] = [cert_data]
-                else:
-                    logging.warning(f"Certificate data fetch failed: {cert_data}")
+                try:
+                    success, cert_data = get_first_certificate(domain)
+                    if success:
+                        all_results['certs'] = [cert_data]
+                    else:
+                        all_results['certs'] = [{
+                            'type': 'SSL Certificate',
+                            'error': str(cert_data) if isinstance(cert_data, str) else cert_data.get('error', 'Unknown error'),
+                            'status': cert_data.get('status', 'Error') if isinstance(cert_data, dict) else 'Error',
+                            'message': cert_data.get('message', 'Unable to retrieve certificate data') if isinstance(cert_data, dict) else str(cert_data)
+                        }]
+                except Exception as e:
+                    logging.error(f"Error getting certificate data: {str(e)}")
+                    all_results['certs'] = [{
+                        'type': 'SSL Certificate',
+                        'error': f'Error retrieving certificate data: {str(e)}',
+                        'status': 'Error',
+                        'message': 'Unable to retrieve certificate data'
+                    }]
                 
                 return jsonify(all_results)
                 

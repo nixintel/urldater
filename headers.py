@@ -114,7 +114,36 @@ async def get_media_dates(url):
         driver.set_page_load_timeout(30)
         
         logging.info(f"Fetching URL: {url}")
-        driver.get(url)
+        try:
+            driver.get(url)
+        except WebDriverException as e:
+            error_message = str(e).lower()
+            if 'err_name_not_resolved' in error_message:
+                return [{
+                    'type': 'Error',
+                    'error': 'Unable to connect to the provided URL. The website may be offline or inaccessible.'
+                }]
+            elif 'err_connection_refused' in error_message:
+                return [{
+                    'type': 'Error',
+                    'error': 'Connection refused. The website is not accepting connections.'
+                }]
+            elif 'err_connection_timed_out' in error_message:
+                return [{
+                    'type': 'Error',
+                    'error': 'Connection timed out. The website took too long to respond.'
+                }]
+            elif 'err_ssl_protocol_error' in error_message:
+                return [{
+                    'type': 'Error',
+                    'error': 'SSL/TLS error. Could not establish a secure connection to the website.'
+                }]
+            else:
+                # For other WebDriver errors, return a generic message
+                return [{
+                    'type': 'Error',
+                    'error': 'Unable to connect to the website. Please check if the URL is correct and the website is accessible.'
+                }]
         
         try:
             WebDriverWait(driver, 10).until(
@@ -142,10 +171,12 @@ async def get_media_dates(url):
                 favicon_elements = driver.find_elements(By.CSS_SELECTOR, selector)
                 for favicon in favicon_elements:
                     favicon_url = favicon.get_attribute('href')
-                    if favicon_url:
+                    if favicon_url and not favicon_url.startswith('data:'):
                         media_dict[favicon_url] = 'favicon'
                         favicon_found = True
                         logging.info(f"Found favicon: {favicon_url}")
+                    else:
+                        logging.debug(f"Skipping data URL or empty favicon: {favicon_url}")
             except Exception as e:
                 logging.warning(f"Error getting favicon with selector {selector}: {str(e)}")
         
@@ -179,13 +210,32 @@ async def get_media_dates(url):
         logging.info(f"Found {len(filtered_media)} valid media items")
         
         # Process media URLs with aiohttp
+        if not filtered_media:
+            logging.info("No valid media items found to check")
+            return [{
+                'type': 'Info',
+                'error': 'No images or icons found on the page to check for last-modified dates.'
+            }]
+
         async with aiohttp.ClientSession() as session:
             tasks = {}  # Dictionary to map tasks to their URLs
             
             for media_url in filtered_media:
+                # Skip data URLs
+                if media_url.startswith('data:'):
+                    logging.debug(f"Skipping data URL: {media_url}")
+                    continue
+                    
                 task = asyncio.create_task(get_last_modified(session, media_url))
                 tasks[task] = media_url
                 logging.info(f"Created task for URL: {media_url}")
+            
+            if not tasks:
+                logging.info("No valid URLs to check after filtering")
+                return [{
+                    'type': 'Info',
+                    'error': 'No valid images or icons found on the page to check for last-modified dates.'
+                }]
             
             # Wait for all tasks with timeout
             done, pending = await asyncio.wait(tasks.keys(), timeout=30)
@@ -209,10 +259,48 @@ async def get_media_dates(url):
                         logging.info(f"Added result: {result}")
                 except Exception as e:
                     logging.error(f"Error processing {media_url}: {str(e)}")
+            
+            if not results:
+                return [{
+                    'type': 'Info',
+                    'status': 'No Results',
+                    'error': 'A connection was made but no items with valid Last-Modified headers were found.'
+                }]
     
+    except WebDriverException as e:
+        logging.error(f"WebDriver error in get_media_dates: {str(e)}")
+        error_message = str(e).lower()
+        if 'err_name_not_resolved' in error_message:
+            return [{
+                'type': 'Error',
+                'error': 'Unable to connect to the provided URL. The website may be offline or inaccessible.'
+            }]
+        elif 'err_connection_refused' in error_message:
+            return [{
+                'type': 'Error',
+                'error': 'Connection refused. The website is not accepting connections.'
+            }]
+        elif 'err_connection_timed_out' in error_message:
+            return [{
+                'type': 'Error',
+                'error': 'Connection timed out. The website took too long to respond.'
+            }]
+        elif 'err_ssl_protocol_error' in error_message:
+            return [{
+                'type': 'Error',
+                'error': 'SSL/TLS error. Could not establish a secure connection to the website.'
+            }]
+        else:
+            return [{
+                'type': 'Error',
+                'error': 'Unable to connect to the website. Please check if the URL is correct and the website is accessible.'
+            }]
     except Exception as e:
         logging.error(f"Error in get_media_dates: {str(e)}")
-        raise
+        return [{
+            'type': 'Error',
+            'error': 'An error occurred while analyzing the website. Please try again later.'
+        }]
     finally:
         if driver:
             try:

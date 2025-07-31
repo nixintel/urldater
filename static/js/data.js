@@ -21,9 +21,11 @@ function displayDomainResults(data) {
     if (data[0].error) {
         const row = document.createElement('tr');
         row.innerHTML = `
-            <td colspan="3" class="text-danger">
-                <i class="bi bi-exclamation-triangle-fill me-2"></i>
-                ${data[0].error}
+            <td colspan="3">
+                <div class="alert alert-warning mb-0">
+                    <i class="bi bi-exclamation-triangle-fill me-2"></i>
+                    <strong>RDAP Service Notice:</strong> ${data[0].error}
+                </div>
             </td>
         `;
         tbody.appendChild(row);
@@ -83,10 +85,27 @@ function displayHeadersResults(data) {
     if (!data || !data.length) {
         const row = document.createElement('tr');
         row.innerHTML = `
-            <td colspan="3" class="text-muted">
+            <td colspan="3">
                 <div class="alert alert-info mb-0">
                     <i class="bi bi-info-circle me-2"></i>
-                    No last-modified headers found.
+                    <strong>Headers Service Notice:</strong> No last-modified headers found.
+                </div>
+            </td>
+        `;
+        tbody.appendChild(row);
+        return;
+    }
+
+    // Check if the response contains an error or info message
+    if (data[0].error) {
+        const row = document.createElement('tr');
+        const alertClass = data[0].type === 'Info' ? 'alert-info' : 'alert-warning';
+        const icon = data[0].type === 'Info' ? 'bi-info-circle' : 'bi-exclamation-triangle-fill';
+        row.innerHTML = `
+            <td colspan="3">
+                <div class="alert ${alertClass} mb-0">
+                    <i class="bi ${icon} me-2"></i>
+                    <strong>Headers Service Notice:</strong> ${data[0].error}
                 </div>
             </td>
         `;
