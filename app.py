@@ -41,8 +41,18 @@ def index():
 async def analyze():
     logging.debug("Analyze route called")
     try:
-        # Get JSON data from request
-        data = request.get_json()
+        # Validate content type
+        if not request.is_json:
+            logging.error("Invalid content type, expected application/json")
+            return jsonify({'error': 'Invalid content type, expected application/json'}), 415
+            
+        try:
+            # Get JSON data from request
+            data = request.get_json()
+        except Exception as e:
+            logging.error(f"Failed to parse JSON data: {str(e)}")
+            return jsonify({'error': 'Invalid JSON format'}), 400
+            
         logging.debug(f"Received data: {data}")
         
         if not data or 'url' not in data:

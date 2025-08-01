@@ -51,12 +51,32 @@ def get_domain_info(url):
             }]
         
         try:
+            # Check for HTML or error page content
+            if "<!DOCTYPE html>" in result.stdout or "<html" in result.stdout:
+                logging.error("Received HTML response instead of RDAP data")
+                return [{
+                    'type': 'Error',
+                    'url': f"https://rdap.org/domain/{domain}",
+                    'last_modified': 'N/A',
+                    'error': 'Invalid response format received from RDAP server'
+                }]
+            
             # Split the output on the known headers
             parts = result.stdout.split("RDAP from Registry:")
             if len(parts) > 1:
                 json_text = parts[1].strip()  # Take the part after "RDAP from Registry:"
             else:
                 json_text = parts[0].strip()  # If no header, take the whole text
+                
+            # Validate JSON structure before parsing
+            if not json_text.startswith('{'):
+                logging.error(f"Invalid JSON format received: {json_text[:100]}")
+                return [{
+                    'type': 'Error',
+                    'url': f"https://rdap.org/domain/{domain}",
+                    'last_modified': 'N/A',
+                    'error': 'Invalid JSON format received from RDAP server'
+                }]
                 
             # Further split if there's a "RDAP from Registrar:" section
             if "RDAP from Registrar:" in json_text:

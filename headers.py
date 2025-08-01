@@ -23,6 +23,17 @@ def format_datetime(dt):
 async def get_last_modified(session, url):
     try:
         async with session.head(url, allow_redirects=True) as response:
+            # Check response status
+            if response.status >= 400:
+                logging.error(f"HTTP error {response.status} for {url}")
+                return None
+                
+            # Validate content type if present
+            content_type = response.headers.get('Content-Type', '')
+            if content_type and 'text/html' in content_type.lower():
+                logging.warning(f"Unexpected HTML response for {url}")
+                return None
+                
             # Check various possible header names
             last_modified = (
                 response.headers.get('last-modified') or

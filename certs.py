@@ -36,6 +36,22 @@ def parse_certificate_data(html_content):
         logging.warning("Received empty HTML content")
         return None
         
+    # Check if response is an error page
+    error_indicators = [
+        "<!DOCTYPE html>",
+        "524 Origin Time-out",
+        "Gateway Time-out",
+        "Bad Gateway",
+        "Service Unavailable"
+    ]
+    
+    if isinstance(html_content, str):
+        html_lower = html_content.lower()
+        for indicator in error_indicators:
+            if indicator.lower() in html_lower:
+                logging.error(f"Received error page: {indicator}")
+                return None
+        
     try:
         soup = BeautifulSoup(html_content, 'html.parser')
         logging.debug("Created BeautifulSoup object")
