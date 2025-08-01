@@ -1,4 +1,6 @@
 // Main application logic
+import { createTimeline } from './timeline.js';
+
 document.addEventListener('DOMContentLoaded', function() {
     // Set copyright year
     document.getElementById('copyright-year').textContent = new Date().getFullYear();
@@ -9,7 +11,7 @@ document.addEventListener('DOMContentLoaded', function() {
         return new bootstrap.Tooltip(tooltipTriggerEl)
     });
 
-    console.log('Page loaded');
+    debugLog('Page loaded');
     
     // Get DOM elements
     const searchForm = document.getElementById('searchForm');
@@ -22,11 +24,11 @@ document.addEventListener('DOMContentLoaded', function() {
     let headersTable = null;
 
     if (!searchForm) {
-        console.error('Search form not found!');
+        debugError('Search form not found!');
         return;
     }
 
-    console.log('Form found:', searchForm);
+    debugLog('Form found:', searchForm);
 
     // Initialize global variables
     window.domainResults = [];
@@ -35,18 +37,12 @@ document.addEventListener('DOMContentLoaded', function() {
     window.headersPagination = { currentPage: 1, perPage: 10 };
     window.currentTimeline = null;
 
-    window.timeline = null;
-    window.timelineItems = new vis.DataSet();
-    
-    // Add event listeners for checkboxes
-    document.getElementById('showRdap').addEventListener('change', updateTimelineVisibility);
-    document.getElementById('showCerts').addEventListener('change', updateTimelineVisibility);
-    document.getElementById('showHeaders').addEventListener('change', updateTimelineVisibility);
+    // Timeline will be managed in timeline.js
     
     // Form submission handler
     searchForm.addEventListener('submit', async function(event) {
         event.preventDefault();
-        console.log('Form submitted');
+        debugLog('Form submitted');
         
         const urlInput = document.getElementById('url');
         const url = urlInput.value;
@@ -55,8 +51,8 @@ document.addEventListener('DOMContentLoaded', function() {
         // Set the analyzed URL in the results title
         document.getElementById('analyzed-url').textContent = url;
         
-        console.log('URL:', url);
-        console.log('Search Type:', searchType);
+        debugLog('URL:', url);
+        debugLog('Search Type:', searchType);
         
         // Show spinner and hide previous results/errors
         spinner.style.display = 'block';
@@ -80,13 +76,10 @@ document.addEventListener('DOMContentLoaded', function() {
         document.getElementById('ssl-certificate').style.display = 'none';
         document.getElementById('timeline').style.display = 'none';
         
-        // Clear timeline if it exists
-        if (window.timeline) {
-            window.timelineItems.clear();
-        }
+        // Timeline will be cleared in createTimeline
 
         try {
-            console.log('Sending request...');
+            debugLog('Sending request...');
             const response = await fetch('/analyze', {
                 method: 'POST',
                 headers: {
@@ -98,7 +91,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 })
             });
 
-            console.log('Response received:', response.status);
+            debugLog('Response received:', response.status);
             
             if (!response.ok) {
                 const errorData = await response.json();
@@ -106,7 +99,7 @@ document.addEventListener('DOMContentLoaded', function() {
             }
 
             const data = await response.json();
-            console.log('Data received:', data);
+            debugLog('Data received:', data);
             
             // Create timeline and update checkboxes
             createTimeline(data);
@@ -152,7 +145,7 @@ document.addEventListener('DOMContentLoaded', function() {
             results.style.display = 'block';
             
         } catch (error) {
-            console.error('Error:', error);
+            debugError('Error:', error);
             errorDiv.textContent = error.message;
             errorDiv.classList.remove('d-none');
         } finally {

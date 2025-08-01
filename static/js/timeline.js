@@ -1,4 +1,19 @@
 // Timeline functionality
+import { DataSet, Timeline } from 'https://cdnjs.cloudflare.com/ajax/libs/vis-timeline/8.2.1/vis-timeline-graph2d.esm.js';
+
+// Initialize timeline variables
+let timeline = null;
+let timelineItems = new DataSet();
+
+// Export functions that need to be called from other files
+export { createTimeline };
+
+// Add event listeners when the module loads
+document.addEventListener('DOMContentLoaded', function() {
+    document.getElementById('showRdap').addEventListener('change', updateTimelineVisibility);
+    document.getElementById('showCerts').addEventListener('change', updateTimelineVisibility);
+    document.getElementById('showHeaders').addEventListener('change', updateTimelineVisibility);
+});
 function updateTimelineFilterVisibility(data) {
     const rdapCheckbox = document.getElementById('showRdap');
     const certsCheckbox = document.getElementById('showCerts');
@@ -46,7 +61,7 @@ function updateTimelineFilterVisibility(data) {
 }
 
 function createTimeline(data) {
-    console.log('Creating timeline with data:', data);
+    debugLog('Creating timeline with data:', data);
     
     const container = document.getElementById('visualization');
     const timelineContainer = document.getElementById('timeline');
@@ -54,6 +69,12 @@ function createTimeline(data) {
     timelineItems.clear();
     let items = [];
     let hasData = false;
+    
+    // Reset timeline if it exists
+    if (timeline) {
+        timeline.destroy();
+        timeline = null;
+    }
 
     let normalizedData = {
         headers: [],
@@ -61,8 +82,8 @@ function createTimeline(data) {
         rdap: []
     };
 
-    console.log('Data type:', typeof data);
-    console.log('Is array:', Array.isArray(data));
+    debugLog('Data type:', typeof data);
+    debugLog('Is array:', Array.isArray(data));
 
     // Normalize the data structure
     if (Array.isArray(data)) {
@@ -93,7 +114,7 @@ function createTimeline(data) {
         }
     }
 
-    console.log('Normalized data:', normalizedData);
+    debugLog('Normalized data:', normalizedData);
 
     // Update checkbox visibility based on normalized data
     updateTimelineFilterVisibility(normalizedData);
@@ -101,7 +122,7 @@ function createTimeline(data) {
     // Process certificate data first
     normalizedData.certs.forEach(item => {
         if (item['First Seen']) {
-            console.log('Processing cert item:', item);
+            debugLog('Processing cert item:', item);
             let date = null;
             
             // Direct handling for certificate date format "DD-MM-YYYY"
@@ -117,7 +138,7 @@ function createTimeline(data) {
                     parseInt(day, 10),
                     0, 0, 0 // Use midnight UTC
                 ));
-                console.log('Parsed certificate date with UTC preservation:', date);
+                debugLog('Parsed certificate date with UTC preservation:', date);
             }
             
             if (date && !isNaN(date.getTime())) {
@@ -130,10 +151,10 @@ function createTimeline(data) {
                     group: 'certs',
                     title: `First SSL certificate<br>Common Name: ${item['Common Name']}<br>First Seen: ${item['First Seen']}`
                 };
-                console.log('Added certificate event to timeline with date:', date);
+                debugLog('Added certificate event to timeline with date:', date);
                 items.push(timelineItem);
             } else {
-                console.error('Failed to parse certificate date:', item['First Seen']);
+                debugError('Failed to parse certificate date:', item['First Seen']);
             }
         }
     });
@@ -141,7 +162,7 @@ function createTimeline(data) {
     // Process headers data
     normalizedData.headers.forEach(item => {
         if (item.last_modified) {
-            console.log('Processing headers item:', item);
+            debugLog('Processing headers item:', item);
             let date = null;
             
             // Direct handling for headers date format "DD-MM-YYYY HH:MM:SS"
@@ -159,7 +180,7 @@ function createTimeline(data) {
                     parseInt(minutes, 10),
                     parseInt(seconds, 10)
                 ));
-                console.log('Parsed headers date with UTC preservation:', date);
+                debugLog('Parsed headers date with UTC preservation:', date);
             }
             
             if (date && !isNaN(date.getTime())) {
@@ -172,16 +193,16 @@ function createTimeline(data) {
                     group: 'headers',
                     title: `${item.type}<br>${item.last_modified}<br>${item.url}`
                 });
-                console.log('Added headers event to timeline with date:', date);
+                debugLog('Added headers event to timeline with date:', date);
             } else {
-                console.error('Failed to parse headers date:', item.last_modified);
+                debugError('Failed to parse headers date:', item.last_modified);
             }
         }
     });
 
     // Process RDAP data
     normalizedData.rdap.forEach(item => {
-        console.log('Processing RDAP item:', item);
+        debugLog('Processing RDAP item:', item);
         
         // Handle registration events
         if (item.type === 'Registered' && !item.error) {
@@ -189,17 +210,17 @@ function createTimeline(data) {
             
             // First try to use the _registered_dt field directly
             if (item._registered_dt) {
-                console.log('Using _registered_dt field directly:', item._registered_dt);
+                debugLog('Using _registered_dt field directly:', item._registered_dt);
                 date = new Date(item._registered_dt);
                 if (isNaN(date.getTime())) {
-                    console.error('Invalid date from _registered_dt:', item._registered_dt);
+                    debugError('Invalid date from _registered_dt:', item._registered_dt);
                     date = null;
                 }
             }
             
             // Fallback: If _registered_dt is missing or invalid, use the string but preserve timezone
             if (!date && (item.registered || item.last_modified)) {
-                console.log('Falling back to string date:', item.registered || item.last_modified);
+                debugLog('Falling back to string date:', item.registered || item.last_modified);
                 
                 // Direct handling for our specific format "DD-MM-YYYY HH:MM:SS UTC"
                 const dateStr = item.registered || item.last_modified;
@@ -216,7 +237,7 @@ function createTimeline(data) {
                         parseInt(minutes, 10),
                         parseInt(seconds, 10)
                     ));
-                    console.log('Parsed date from string with UTC preservation:', date);
+                    debugLog('Parsed date from string with UTC preservation:', date);
                 }
             }
             
@@ -231,9 +252,9 @@ function createTimeline(data) {
                     group: 'rdap',
                     title: `Domain Registration<br>${item.registered || item.last_modified}`
                 });
-                console.log('Added registration event to timeline with date:', date);
+                debugLog('Added registration event to timeline with date:', date);
             } else {
-                console.error('Failed to get a valid date for registration event');
+                debugError('Failed to get a valid date for registration event');
             }
         }
         
@@ -243,17 +264,17 @@ function createTimeline(data) {
             
             // First try to use the _updated_dt field directly
             if (item._updated_dt) {
-                console.log('Using _updated_dt field directly:', item._updated_dt);
+                debugLog('Using _updated_dt field directly:', item._updated_dt);
                 date = new Date(item._updated_dt);
                 if (isNaN(date.getTime())) {
-                    console.error('Invalid date from _updated_dt:', item._updated_dt);
+                    debugError('Invalid date from _updated_dt:', item._updated_dt);
                     date = null;
                 }
             }
             
             // Fallback: If _updated_dt is missing or invalid, use the string but preserve timezone
             if (!date && (item.updated || item.last_modified)) {
-                console.log('Falling back to string date:', item.updated || item.last_modified);
+                debugLog('Falling back to string date:', item.updated || item.last_modified);
                 
                 // Direct handling for our specific format "DD-MM-YYYY HH:MM:SS UTC"
                 const dateStr = item.updated || item.last_modified;
@@ -270,7 +291,7 @@ function createTimeline(data) {
                         parseInt(minutes, 10),
                         parseInt(seconds, 10)
                     ));
-                    console.log('Parsed date from string with UTC preservation:', date);
+                    debugLog('Parsed date from string with UTC preservation:', date);
                 }
             }
             
@@ -285,20 +306,20 @@ function createTimeline(data) {
                     group: 'rdap',
                     title: `Domain Update<br>${item.updated || item.last_modified}`
                 });
-                console.log('Added update event to timeline with date:', date);
+                debugLog('Added update event to timeline with date:', date);
             } else {
-                console.error('Failed to get a valid date for update event');
+                debugError('Failed to get a valid date for update event');
             }
         }
     });
 
     // Only create timeline if we have data
     if (hasData && items.length > 0) {
-        console.log('Adding items to timeline:', JSON.stringify(items, null, 2));
+        debugLog('Adding items to timeline:', JSON.stringify(items, null, 2));
         
         try {
             // Create a new DataSet with the items
-            timelineItems = new vis.DataSet(items);
+            timelineItems = new DataSet(items);
             
             const options = {
                 height: '300px',
@@ -312,7 +333,7 @@ function createTimeline(data) {
             };
 
             if (timeline === null) {
-                timeline = new vis.Timeline(container, timelineItems, options);
+                timeline = new Timeline(container, timelineItems, options);
             } else {
                 timeline.setOptions(options);
                 timeline.setItems(timelineItems);
@@ -323,10 +344,10 @@ function createTimeline(data) {
             
             timelineContainer.style.display = 'block';
         } catch (e) {
-            console.error('Error creating timeline:', e);
+            debugError('Error creating timeline:', e);
         }
     } else {
-        console.log('No data to display in timeline. hasData:', hasData, 'items.length:', items.length);
+        debugLog('No data to display in timeline. hasData:', hasData, 'items.length:', items.length);
         timelineContainer.style.display = 'none';
     }
 }
