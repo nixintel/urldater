@@ -79,56 +79,76 @@ async def analyze():
         try:
             # Handle different search types
             if search_type == 'all':
-                logging.debug("Getting all data types...")
+                logging.debug("Getting all data types concurrently...")
                 
-                # Get RDAP data
-                try:
-                    rdap_results = get_domain_info(url)
-                    all_results['rdap'] = rdap_results if rdap_results else [{
-                        'type': 'Error',
-                        'error': 'No RDAP data could be found for this domain.'
-                    }]
-                except Exception as e:
-                    logging.error(f"Error getting RDAP data: {str(e)}")
-                    all_results['rdap'] = [{
-                        'type': 'Error',
-                        'error': f'Error retrieving RDAP data: {str(e)}'
-                    }]
-                
-                # Get Headers data
-                try:
-                    headers_results = await get_media_dates(url)
-                    all_results['headers'] = headers_results if headers_results else [{
-                        'type': 'Error',
-                        'error': 'No header data could be found.'
-                    }]
-                except Exception as e:
-                    logging.error(f"Error getting headers data: {str(e)}")
-                    all_results['headers'] = [{
-                        'type': 'Error',
-                        'error': f'Error retrieving header data: {str(e)}'
-                    }]
-                
-                # Get Certificate data
-                try:
-                    success, cert_data = get_first_certificate(domain)
-                    if success:
-                        all_results['certs'] = [cert_data]
-                    else:
-                        all_results['certs'] = [{
-                            'type': 'SSL Certificate',
-                            'error': str(cert_data) if isinstance(cert_data, str) else cert_data.get('error', 'Unknown error'),
-                            'status': cert_data.get('status', 'Error') if isinstance(cert_data, dict) else 'Error',
-                            'message': cert_data.get('message', 'Unable to retrieve certificate data') if isinstance(cert_data, dict) else str(cert_data)
+                async def fetch_rdap():
+                    try:
+                        results = await get_domain_info(url)
+                        return results if results else [{
+                            'type': 'Error',
+                            'error': 'No RDAP data could be found for this domain.'
                         }]
-                except Exception as e:
-                    logging.error(f"Error getting certificate data: {str(e)}")
-                    all_results['certs'] = [{
-                        'type': 'SSL Certificate',
-                        'error': f'Error retrieving certificate data: {str(e)}',
-                        'status': 'Error',
-                        'message': 'Unable to retrieve certificate data'
-                    }]
+                    except Exception as e:
+                        logging.error(f"Error getting RDAP data: {str(e)}")
+                        return [{
+                            'type': 'Error',
+                            'error': f'Error retrieving RDAP data: {str(e)}'
+                        }]
+
+                async def fetch_headers():
+                    try:
+                        results = await get_media_dates(url)
+                        return results if results else [{
+                            'type': 'Error',
+                            'error': 'No header data could be found.'
+                        }]
+                    except Exception as e:
+                        logging.error(f"Error getting headers data: {str(e)}")
+                        return [{
+                            'type': 'Error',
+                            'error': f'Error retrieving header data: {str(e)}'
+                        }]
+
+                async def fetch_certs():
+                    try:
+                        success, cert_data = await get_first_certificate(domain)
+                        if success:
+                            return [cert_data]
+                        else:
+                            return [{
+                                'type': 'SSL Certificate',
+                                'error': str(cert_data) if isinstance(cert_data, str) else cert_data.get('error', 'Unknown error'),
+                                'status': cert_data.get('status', 'Error') if isinstance(cert_data, dict) else 'Error',
+                                'message': cert_data.get('message', 'Unable to retrieve certificate data') if isinstance(cert_data, dict) else str(cert_data)
+                            }]
+                    except Exception as e:
+                        logging.error(f"Error getting certificate data: {str(e)}")
+                        return [{
+                            'type': 'SSL Certificate',
+                            'error': f'Error retrieving certificate data: {str(e)}',
+                            'status': 'Error',
+                            'message': 'Unable to retrieve certificate data'
+                        }]
+
+                # Run all tasks concurrently
+                rdap_task = asyncio.create_task(fetch_rdap())
+                headers_task = asyncio.create_task(fetch_headers())
+                certs_task = asyncio.create_task(fetch_certs())
+
+                # Wait for all tasks to complete
+                all_results['rdap'], all_results['headers'], all_results['certs'] = await asyncio.gather(
+                    rdap_task, headers_task, certs_task,
+                    return_exceptions=True  # Don't let one failure stop others
+                )
+
+                # Handle any exceptions from gather
+                for key, result in all_results.items():
+                    if isinstance(result, Exception):
+                        logging.error(f"Error in {key} task: {str(result)}")
+                        all_results[key] = [{
+                            'type': 'Error',
+                            'error': f'Task failed: {str(result)}'
+                        }]
                 
                 return jsonify(all_results)
                 

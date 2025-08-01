@@ -368,6 +368,17 @@ function updateTimelineVisibility() {
     });
     
     if (timeline) {
-        timeline.setItems(new vis.DataSet(visibleItems));
+        const newDataSet = new DataSet(visibleItems);
+        timeline.setItems(newDataSet);
+        
+        // If there are visible items, fit them in the view
+        if (visibleItems.length > 0) {
+            timeline.fit({
+                animation: {
+                    duration: 1000,
+                    easingFunction: 'easeInOutQuad'
+                }
+            });
+        }
     }
 } 

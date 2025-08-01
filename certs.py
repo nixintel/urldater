@@ -10,6 +10,7 @@ from bs4 import BeautifulSoup
 import time
 import argparse
 import logging
+import asyncio
 from datetime import datetime
 
 logging.basicConfig(level=logging.DEBUG)
@@ -193,7 +194,7 @@ def check_crtsh_status(driver, timeout=30):
     except Exception as e:
         return False, f"crt.sh appears to be down: {str(e)}"
 
-def get_first_certificate(domain):
+async def get_first_certificate(domain):
     """
     Connect to crt.sh and attempt to retrieve certificate information.
     Returns tuple of (success, result), where result is either the data or error message.
@@ -212,6 +213,9 @@ def get_first_certificate(domain):
     chrome_options.add_argument('--dns-prefetch-disable')
     chrome_options.add_argument('--disable-features=VizDisplayCompositor')
     chrome_options.page_load_strategy = 'eager'  # Don't wait for all resources
+    
+    # Create event loop for async operations
+    loop = asyncio.get_event_loop()
     
     # Add more detailed logging
     logging.debug("Chrome options configured")

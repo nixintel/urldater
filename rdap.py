@@ -2,6 +2,7 @@ from urllib.parse import urlparse
 import subprocess
 import json
 import logging
+import asyncio
 from datetime import datetime, timezone
 
 def format_datetime(dt):
@@ -10,7 +11,7 @@ def format_datetime(dt):
         dt = dt.replace(tzinfo=timezone.utc)
     return dt.strftime('%d-%m-%Y %H:%M:%S %Z')
 
-def get_domain_info(url):
+async def get_domain_info(url):
     logging.info("Starting get_domain_info function")
     try:
         parsed_url = urlparse(url)
@@ -22,13 +23,21 @@ def get_domain_info(url):
         
         # Run the rdap command with improved output capture
         try:
-            result = subprocess.run(
-                ['rdap', '--json', domain],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                check=True
+            # Create subprocess asynchronously
+            process = await asyncio.create_subprocess_exec(
+                'rdap', '--json', domain,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                text=True
             )
+            
+            # Wait for the command to complete
+            stdout, stderr = await process.communicate()
+            
+            if process.returncode != 0:
+                raise subprocess.CalledProcessError(process.returncode, ['rdap', '--json', domain], stdout, stderr)
+                
+            result = type('Result', (), {'stdout': stdout, 'returncode': process.returncode})
         except subprocess.CalledProcessError as e:
             logging.error(f"RDAP lookup failed: {e.output}")
             return [{
