@@ -137,9 +137,17 @@ document.addEventListener('DOMContentLoaded', function() {
             } else if (searchType === 'headers' && data) {
                 document.getElementById('headers-info').style.display = 'block';
                 displayHeadersResults(data);
-            } else if (searchType === 'certs' && data) {
+            } else if (searchType === 'certs') {
                 document.getElementById('ssl-certificate').style.display = 'block';
-                displayCertificateResults(data);
+                // Handle both array and error object formats
+                if (Array.isArray(data)) {
+                    displayCertificateResults(data);
+                } else if (data && (data.error || data.status === 'Service Unavailable')) {
+                    // Handle error object format
+                    displayCertificateResults([data]);
+                } else {
+                    displayCertificateResults(null);
+                }
             }
             
             results.style.display = 'block';
