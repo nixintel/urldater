@@ -5,6 +5,7 @@ import validators
 import logging
 import pandas as pd
 import io
+import asyncio
 from datetime import datetime, timezone
 import zipfile
 from selenium import webdriver
@@ -81,20 +82,17 @@ async def analyze():
             if search_type == 'all':
                 logging.debug("Getting all data types concurrently...")
                 
-                async def fetch_rdap():
-                    try:
-                        results = await get_domain_info(url)
-                        return results if results else [{
-                            'type': 'Error',
-                            'error': 'No RDAP data could be found for this domain.'
-                        }]
-                    except Exception as e:
-                        logging.error(f"Error getting RDAP data: {str(e)}")
-                        return [{
-                            'type': 'Error',
-                            'error': f'Error retrieving RDAP data: {str(e)}'
-                        }]
+                # Get RDAP data synchronously first
+                try:
+                    all_results['rdap'] = get_domain_info(url)
+                except Exception as e:
+                    logging.error(f"Error getting RDAP data: {str(e)}")
+                    all_results['rdap'] = [{
+                        'type': 'Error',
+                        'error': f'Error retrieving RDAP data: {str(e)}'
+                    }]
 
+                # Then get headers and certs concurrently
                 async def fetch_headers():
                     try:
                         results = await get_media_dates(url)
@@ -115,29 +113,24 @@ async def analyze():
                         if success:
                             return [cert_data]
                         else:
-                            return [{
-                                'type': 'SSL Certificate',
-                                'error': str(cert_data) if isinstance(cert_data, str) else cert_data.get('error', 'Unknown error'),
-                                'status': cert_data.get('status', 'Error') if isinstance(cert_data, dict) else 'Error',
-                                'message': cert_data.get('message', 'Unable to retrieve certificate data') if isinstance(cert_data, dict) else str(cert_data)
-                            }]
+                            # Pass through the error from certs.py
+                            return [cert_data]
                     except Exception as e:
                         logging.error(f"Error getting certificate data: {str(e)}")
                         return [{
                             'type': 'SSL Certificate',
-                            'error': f'Error retrieving certificate data: {str(e)}',
+                            'error': 'Unable to retrieve certificate data',
                             'status': 'Error',
-                            'message': 'Unable to retrieve certificate data'
+                            'message': 'The certificate service is currently unavailable. Please try again later.'
                         }]
 
-                # Run all tasks concurrently
-                rdap_task = asyncio.create_task(fetch_rdap())
+                # Run headers and certs tasks concurrently
                 headers_task = asyncio.create_task(fetch_headers())
                 certs_task = asyncio.create_task(fetch_certs())
 
-                # Wait for all tasks to complete
-                all_results['rdap'], all_results['headers'], all_results['certs'] = await asyncio.gather(
-                    rdap_task, headers_task, certs_task,
+                # Wait for headers and certs tasks to complete
+                all_results['headers'], all_results['certs'] = await asyncio.gather(
+                    headers_task, certs_task,
                     return_exceptions=True  # Don't let one failure stop others
                 )
 
@@ -164,12 +157,13 @@ async def analyze():
                 
             elif search_type == 'certs':
                 logging.debug("Getting certificate data...")
-                success, cert_data = get_first_certificate(domain)
+                success, cert_data = await get_first_certificate(domain)
                 if success:
                     return jsonify([cert_data])
                 else:
                     logging.error(f"Certificate error: {cert_data}")
-                    return jsonify({'error': str(cert_data)}), 400
+                    # Pass through the error from certs.py
+                    return jsonify([cert_data])
             
             else:
                 return jsonify({'error': 'Invalid search type'}), 400
@@ -302,7 +296,7 @@ def export_all():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/search', methods=['POST'])
-def search():
+async def search():
     try:
         # Handle both form data and JSON data
         if request.is_json:
@@ -321,9 +315,18 @@ def search():
         if search_type == 'rdap':
             results = get_domain_info(domain)
         elif search_type == 'headers':
-            results = get_media_dates(domain)
+            results = await get_media_dates(domain)
         elif search_type == 'certs':
-            results = get_certificate_data(domain)
+            success, cert_data = await get_first_certificate(domain)
+            if success:
+                results = [cert_data]
+            else:
+                results = [{
+                    'type': 'SSL Certificate',
+                    'error': str(cert_data) if isinstance(cert_data, str) else cert_data.get('error', 'Unknown error'),
+                    'status': cert_data.get('status', 'Error') if isinstance(cert_data, dict) else 'Error',
+                    'message': cert_data.get('message', 'Unable to retrieve certificate data') if isinstance(cert_data, dict) else str(cert_data)
+                }]
         else:
             return jsonify({'error': 'Invalid search type'}), 400
             

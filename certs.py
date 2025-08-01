@@ -74,14 +74,14 @@ def parse_certificate_data(html_content):
         
         if not cert_table:
             logging.warning("No tables found with rows")
-            return None
+            return False  # Special case: page loaded but no certificates found
             
         rows = cert_table.find_all('tr')
         logging.debug(f"Using table with {len(rows)} rows")
         
         if len(rows) < 2:  # Need at least header row and one data row
             logging.warning("No certificate rows found")
-            return None
+            return False  # Special case: page loaded but no certificates found
         
         # Get the last row (most recent certificate)
         data_row = rows[-1]  # Get the last row
@@ -92,7 +92,7 @@ def parse_certificate_data(html_content):
         
         if len(cells) < 6:  # crt.sh typically has at least 6 columns
             logging.warning(f"Unexpected number of cells: {len(cells)}")
-            return None
+            return False  # Special case: page loaded but no valid certificate data found
             
         try:
             # Extract the certificate ID and create source URL
@@ -164,7 +164,12 @@ def check_crtsh_status(driver, timeout=30):
             try:
                 driver.get("https://crt.sh")
             except Exception as e:
-                return False, f"crt.sh is responding too slowly or may be offline: {str(e)}"
+                return False, {
+                    'type': 'SSL Certificate',
+                    'error': 'Unable to connect to certificate service',
+                    'status': 'Service Unavailable',
+                    'message': 'The certificate service is currently unavailable. Please try again later.'
+                }
         
         # Check for common server error indicators
         error_texts = [
@@ -182,17 +187,32 @@ def check_crtsh_status(driver, timeout=30):
                 lambda d: len(d.page_source) > 0
             )
         except TimeoutException:
-            return False, "crt.sh page load timeout"
+            return False, {
+                'type': 'SSL Certificate',
+                'error': 'Service timeout',
+                'status': 'Timeout',
+                'message': 'The certificate service is taking too long to respond. Please try again later.'
+            }
             
         page_source = driver.page_source.lower()
         for error in error_texts:
             if error.lower() in page_source:
-                return False, f"crt.sh is experiencing issues: {error}"
+                return False, {
+                    'type': 'SSL Certificate',
+                    'error': 'Service error',
+                    'status': 'Service Unavailable',
+                    'message': 'The certificate service is experiencing technical difficulties. Please try again later.'
+                }
         
         return True, None
         
     except Exception as e:
-        return False, f"crt.sh appears to be down: {str(e)}"
+        return False, {
+            'type': 'SSL Certificate',
+            'error': 'Service unavailable',
+            'status': 'Service Unavailable',
+            'message': 'Unable to connect to the certificate service. Please try again later.'
+        }
 
 async def get_first_certificate(domain):
     """
@@ -336,15 +356,28 @@ async def get_first_certificate(domain):
                 logging.debug("Got page source, parsing certificate data...")
                 cert_data = parse_certificate_data(html_content)
                 
-                if cert_data:
-                    logging.info(f"Successfully retrieved certificate data for {domain}")
-                    return True, cert_data
-                else:
-                    error_msg = "No certificate data found in the response"
-                    logging.warning(f"Certificate data not found for {domain}: {error_msg}")
+                if cert_data is None:
+                    # None means parsing failed due to invalid/incomplete HTML
                     if attempt == max_retries - 1:
-                        return False, error_msg
+                        return False, {
+                            'type': 'SSL Certificate',
+                            'error': 'Unable to parse certificate data',
+                            'status': 'Error',
+                            'message': 'The certificate service returned an invalid response. Please try again later.'
+                        }
                     time.sleep(2)
+                    continue
+
+                if cert_data == False:  # Special case: page loaded but no certificates found
+                    return False, {
+                        'type': 'SSL Certificate',
+                        'error': 'No certificates found',
+                        'status': 'Not Found',
+                        'message': 'No certificates for the domain could be found.'
+                    }
+
+                logging.info(f"Successfully retrieved certificate data for {domain}")
+                return True, cert_data
                 
             except TimeoutException as e:
                 error_msg = f"Timeout error on attempt {attempt + 1}/{max_retries}: {str(e)}"
