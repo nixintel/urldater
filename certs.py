@@ -221,18 +221,7 @@ async def get_first_certificate(domain):
     """
     logging.debug(f"Starting certificate search for domain: {domain}")
     
-    chrome_options = Options()
-    chrome_options.add_argument('--headless=new')
-    chrome_options.add_argument('--no-sandbox')
-    chrome_options.add_argument('--disable-dev-shm-usage')
-    chrome_options.add_argument('--disable-gpu')
-    chrome_options.add_argument('--window-size=1920,1080')
-    chrome_options.add_argument('--disable-web-security')
-    chrome_options.add_argument('--ignore-certificate-errors')
-    chrome_options.add_argument('--disable-extensions')
-    chrome_options.add_argument('--dns-prefetch-disable')
-    chrome_options.add_argument('--disable-features=VizDisplayCompositor')
-    chrome_options.page_load_strategy = 'eager'  # Don't wait for all resources
+    from webdriver_manager import driver_pool
     
     # Create event loop for async operations
     loop = asyncio.get_event_loop()
@@ -250,15 +239,13 @@ async def get_first_certificate(domain):
             try:
                 logging.debug(f"Attempt {attempt + 1}/{max_retries} to get certificate data")
                 
-                # Create a new service for each attempt
-                service = Service()
-                logging.debug("Chrome service initialized")
+                # Get a driver from the pool
+                driver = driver_pool.get_driver()
+                logging.debug("Got WebDriver from pool")
                 
                 # Add a small delay between attempts
                 if attempt > 0:
                     time.sleep(5)
-                
-                driver = webdriver.Chrome(service=service, options=chrome_options)
                 
                 # Set initial shorter timeout for quick checks
                 driver.set_page_load_timeout(20)
@@ -421,23 +408,15 @@ async def get_first_certificate(domain):
                 time.sleep(2)
                 
             finally:
-                # Clean up resources
+                # Return driver to pool
                 if driver:
                     try:
-                        driver.quit()
-                        time.sleep(1)  # Give time for cleanup
+                        driver_pool.return_driver(driver)
+                        logging.debug("Returned WebDriver to pool")
                     except Exception as e:
-                        logging.warning(f"Error closing browser: {str(e)}")
+                        logging.warning(f"Error returning WebDriver to pool: {str(e)}")
                     finally:
                         driver = None
-                
-                if service:
-                    try:
-                        service.stop()
-                    except Exception as e:
-                        logging.warning(f"Error stopping service: {str(e)}")
-                    finally:
-                        service = None
     
     except Exception as e:
         error_msg = f"Unexpected error: {str(e)}"

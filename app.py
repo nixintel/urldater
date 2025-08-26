@@ -13,10 +13,12 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from markdown2 import Markdown
 import os
+import atexit
 
 from headers import get_media_dates
 from rdap import get_domain_info
 from certs import get_first_certificate, extract_main_domain, get_certificate_data
+from webdriver_manager import driver_pool
 
 app = Flask(__name__)
 logging.basicConfig(level=logging.DEBUG)
@@ -124,15 +126,33 @@ async def analyze():
                             'message': 'The certificate service is currently unavailable. Please try again later.'
                         }]
 
-                # Run headers and certs tasks concurrently
-                headers_task = asyncio.create_task(fetch_headers())
-                certs_task = asyncio.create_task(fetch_certs())
+                # Try concurrent execution first
+                try:
+                    # Run headers and certs tasks concurrently
+                    headers_task = asyncio.create_task(fetch_headers())
+                    certs_task = asyncio.create_task(fetch_certs())
 
-                # Wait for headers and certs tasks to complete
-                all_results['headers'], all_results['certs'] = await asyncio.gather(
-                    headers_task, certs_task,
-                    return_exceptions=True  # Don't let one failure stop others
-                )
+                    # Wait for both tasks with a timeout
+                    all_results['headers'], all_results['certs'] = await asyncio.wait_for(
+                        asyncio.gather(headers_task, certs_task, return_exceptions=True),
+                        timeout=60  # 60 second timeout for concurrent execution
+                    )
+                except asyncio.TimeoutError:
+                    logging.warning("Concurrent execution timed out, falling back to sequential execution")
+                    # Cancel any pending tasks
+                    if not headers_task.done():
+                        headers_task.cancel()
+                    if not certs_task.done():
+                        certs_task.cancel()
+                        
+                    # Run sequentially
+                    all_results['headers'] = await fetch_headers()
+                    all_results['certs'] = await fetch_certs()
+                except Exception as e:
+                    logging.error(f"Error during concurrent execution: {str(e)}")
+                    # Run sequentially as fallback
+                    all_results['headers'] = await fetch_headers()
+                    all_results['certs'] = await fetch_certs()
 
                 # Handle any exceptions from gather
                 for key, result in all_results.items():
@@ -385,6 +405,13 @@ def create_chrome_driver():
     
     service = Service(ChromeDriverManager(chrome_type=ChromeType.GOOGLE).install())
     return webdriver.Chrome(service=service, options=chrome_options)
+
+# Register cleanup function
+def cleanup_webdriver_pool():
+    logging.info("Cleaning up WebDriver pool")
+    driver_pool.cleanup_all()
+
+atexit.register(cleanup_webdriver_pool)
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000) 

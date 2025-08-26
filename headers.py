@@ -105,24 +105,14 @@ def get_elements_with_retry(driver, by, value, max_retries=3, timeout=10):
 async def get_media_dates(url):
     logging.info(f"Starting get_media_dates for URL: {url}")
     
-    chrome_options = Options()
-    chrome_options.add_argument('--headless=new')
-    chrome_options.add_argument('--no-sandbox')
-    chrome_options.add_argument('--disable-dev-shm-usage')
-    chrome_options.add_argument('--disable-gpu')
-    chrome_options.binary_location = '/usr/bin/google-chrome-stable'
-    chrome_options.add_argument('--window-size=1920,1080')
-    chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36')
+    from webdriver_manager import driver_pool
     
     results = []
     driver = None
     
     try:
-        logging.info("Initializing Chrome WebDriver")
-        chrome_options.page_load_strategy = 'eager'
-        service = Service()
-        driver = webdriver.Chrome(service=service, options=chrome_options)
-        driver.set_page_load_timeout(30)
+        logging.info("Getting WebDriver from pool")
+        driver = driver_pool.get_driver()
         
         logging.info(f"Fetching URL: {url}")
         try:
@@ -315,10 +305,10 @@ async def get_media_dates(url):
     finally:
         if driver:
             try:
-                driver.quit()
-                logging.info("Chrome WebDriver closed")
+                driver_pool.return_driver(driver)
+                logging.info("WebDriver returned to pool")
             except Exception as e:
-                logging.warning(f"Error closing browser: {str(e)}")
+                logging.warning(f"Error returning WebDriver to pool: {str(e)}")
     
     logging.info(f"Returning {len(results)} results")
     return results
