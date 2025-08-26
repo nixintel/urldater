@@ -105,7 +105,7 @@ def get_elements_with_retry(driver, by, value, max_retries=3, timeout=10):
 async def get_media_dates(url):
     logging.info(f"Starting get_media_dates for URL: {url}")
     
-    from webdriver_manager import driver_pool
+    from chrome_driver_pool import driver_pool
     
     results = []
     driver = None

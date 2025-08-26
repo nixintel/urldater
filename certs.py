@@ -221,7 +221,7 @@ async def get_first_certificate(domain):
     """
     logging.debug(f"Starting certificate search for domain: {domain}")
     
-    from webdriver_manager import driver_pool
+    from chrome_driver_pool import driver_pool
     
     # Create event loop for async operations
     loop = asyncio.get_event_loop()

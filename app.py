@@ -18,7 +18,7 @@ import atexit
 from headers import get_media_dates
 from rdap import get_domain_info
 from certs import get_first_certificate, extract_main_domain, get_certificate_data
-from webdriver_manager import driver_pool
+from chrome_driver_pool import driver_pool
 
 app = Flask(__name__)
 logging.basicConfig(level=logging.DEBUG)
