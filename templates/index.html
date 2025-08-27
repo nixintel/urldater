@@ -4,7 +4,7 @@
 
 {% block extra_css %}
 <link href="https://cdn.datatables.net/1.10.18/media/css/jquery.dataTables.min.css" rel="stylesheet">
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.7.2/font/bootstrap-icons.css">
+
 <script type="module" src="https://cdnjs.cloudflare.com/ajax/libs/vis-timeline/8.2.1/vis-timeline-graph2d.esm.js"></script>
 <link href="https://cdnjs.cloudflare.com/ajax/libs/vis-timeline/8.2.1/vis-timeline-graph2d.min.css" rel="stylesheet" type="text/css" />
 <style>
@@ -147,15 +147,57 @@
         outline: none;
     }
     
-    /* Make all export buttons match the "analyze" button color */
+    /* Export buttons and indicators */
     .btn-export, .export-btn, #exportAllBtn {
         background-color: #007bff;
         color: white;
+        transition: all 0.3s ease;
     }
     
     .btn-export:hover, .export-btn:hover, #exportAllBtn:hover {
         background-color: #0069d9;
         color: white;
+        transform: translateY(-1px);
+    }
+
+    .btn-export i, .export-btn i {
+        margin-right: 5px;
+    }
+
+    #export-spinner {
+        width: 1.5rem;
+        height: 1.5rem;
+        margin-top: 5px;
+    }
+
+    /* Export button colors */
+    .btn-export-png {
+        background-color: #28a745;
+    }
+    
+    .btn-export-png:hover {
+        background-color: #218838;
+    }
+    
+    .btn-export-pdf {
+        background-color: #dc3545;
+    }
+    
+    .btn-export-pdf:hover {
+        background-color: #c82333;
+    }
+
+    /* Export button container */
+    .export-buttons {
+        display: flex;
+        gap: 0.5rem;
+        align-items: center;
+    }
+
+    /* Disable export buttons during export */
+    .exporting {
+        pointer-events: none;
+        opacity: 0.7;
     }
 </style>
 {% endblock %}
@@ -218,8 +260,19 @@
     <div id="results" class="mt-4" style="display: none;">
         <!-- Add URL title and Export All button at the top -->
         <h2 class="mb-3">Results for URL: <span id="analyzed-url" class="text-primary"></span></h2>
-        <div class="mb-4">
-            <button class="btn btn-primary" onclick="exportAll()">Export All Data</button>
+        <div class="mb-4 export-buttons">
+            <button class="btn btn-primary btn-export" onclick="exportAll()">
+                <i class="bi bi-file-earmark-arrow-down"></i> Export All Data
+            </button>
+            <button class="btn btn-success btn-export-png" onclick="exportAsPNG()">
+                <i class="bi bi-file-image"></i> Save as PNG
+            </button>
+            <button class="btn btn-danger btn-export-pdf" onclick="exportAsPDF()">
+                <i class="bi bi-file-pdf"></i> Save as PDF
+            </button>
+            <div id="export-spinner" class="spinner-border text-primary" role="status" style="display: none;">
+                <span class="visually-hidden">Exporting...</span>
+            </div>
         </div>
 
         <div id="domain-info" class="mt-4">
