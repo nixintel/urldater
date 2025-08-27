@@ -127,41 +127,68 @@ async def analyze():
                         }]
 
                 # Try concurrent execution first
+                tasks_started = datetime.now(timezone.utc)
+                logging.info(f"[TASKS] Starting concurrent execution at {tasks_started}")
+                
                 try:
                     # Run headers and certs tasks concurrently
                     headers_task = asyncio.create_task(fetch_headers())
                     certs_task = asyncio.create_task(fetch_certs())
-
-                    # Wait for both tasks with a timeout
-                    all_results['headers'], all_results['certs'] = await asyncio.wait_for(
-                        asyncio.gather(headers_task, certs_task, return_exceptions=True),
-                        timeout=60  # 60 second timeout for concurrent execution
-                    )
-                except asyncio.TimeoutError:
-                    logging.warning("Concurrent execution timed out, falling back to sequential execution")
-                    # Cancel any pending tasks
-                    if not headers_task.done():
-                        headers_task.cancel()
-                    if not certs_task.done():
-                        certs_task.cancel()
+                    active_tasks = [headers_task, certs_task]
+                    
+                    try:
+                        # Wait for both tasks with a timeout
+                        all_results['headers'], all_results['certs'] = await asyncio.wait_for(
+                            asyncio.gather(*active_tasks, return_exceptions=True),
+                            timeout=60  # 60 second timeout for concurrent execution
+                        )
+                        logging.info("[TASKS] All concurrent tasks completed successfully")
                         
-                    # Run sequentially
-                    all_results['headers'] = await fetch_headers()
-                    all_results['certs'] = await fetch_certs()
+                    except asyncio.TimeoutError:
+                        logging.warning("[TASKS] Concurrent execution timed out, falling back to sequential execution")
+                        # Cancel and clean up any pending tasks
+                        for task in active_tasks:
+                            if not task.done():
+                                task.cancel()
+                                try:
+                                    await task
+                                except asyncio.CancelledError:
+                                    logging.info(f"[TASKS] Successfully cancelled task {task}")
+                                except Exception as e:
+                                    logging.error(f"[TASKS] Error cancelling task {task}: {str(e)}")
+                        
+                        # Run sequentially
+                        logging.info("[TASKS] Starting sequential execution after timeout")
+                        all_results['headers'] = await fetch_headers()
+                        all_results['certs'] = await fetch_certs()
+                        
                 except Exception as e:
-                    logging.error(f"Error during concurrent execution: {str(e)}")
+                    logging.error(f"[TASKS] Error during concurrent execution: {str(e)}")
                     # Run sequentially as fallback
+                    logging.info("[TASKS] Starting sequential execution after error")
                     all_results['headers'] = await fetch_headers()
                     all_results['certs'] = await fetch_certs()
+                
+                finally:
+                    # Clean up and log completion
+                    tasks_completed = datetime.now(timezone.utc)
+                    duration = (tasks_completed - tasks_started).total_seconds()
+                    logging.info(f"[TASKS] All tasks completed at {tasks_completed} (took {duration:.2f} seconds)")
+                    
+                    # Force cleanup of any resources
+                    driver_pool.cleanup_all()
+                    logging.info("[TASKS] WebDriver pool cleaned up")
 
                 # Handle any exceptions from gather
                 for key, result in all_results.items():
                     if isinstance(result, Exception):
-                        logging.error(f"Error in {key} task: {str(result)}")
+                        logging.error(f"[TASKS] Error in {key} task: {str(result)}")
                         all_results[key] = [{
                             'type': 'Error',
                             'error': f'Task failed: {str(result)}'
                         }]
+                    else:
+                        logging.info(f"[TASKS] Successfully completed {key} task")
                 
                 return jsonify(all_results)
                 
@@ -317,6 +344,9 @@ def export_all():
 
 @app.route('/search', methods=['POST'])
 async def search():
+    task_started = datetime.now(timezone.utc)
+    logging.info(f"[TASK] Starting {request.method} /search at {task_started}")
+    
     try:
         # Handle both form data and JSON data
         if request.is_json:
@@ -327,30 +357,49 @@ async def search():
             domain = request.form.get('domain')
             search_type = request.form.get('searchType')
         
-        app.logger.debug(f"Received search request - Type: {search_type}, Domain: {domain}")
+        logging.info(f"[TASK] Processing {search_type} search for domain: {domain}")
         
         if not domain:
             return jsonify({'error': 'No domain provided'}), 400
             
-        if search_type == 'rdap':
-            results = get_domain_info(domain)
-        elif search_type == 'headers':
-            results = await get_media_dates(domain)
-        elif search_type == 'certs':
-            success, cert_data = await get_first_certificate(domain)
-            if success:
-                results = [cert_data]
+        try:
+            if search_type == 'rdap':
+                results = get_domain_info(domain)
+                logging.info("[TASK] RDAP search completed")
+            elif search_type == 'headers':
+                results = await get_media_dates(domain)
+                logging.info("[TASK] Headers search completed")
+            elif search_type == 'certs':
+                success, cert_data = await get_first_certificate(domain)
+                if success:
+                    results = [cert_data]
+                    logging.info("[TASK] Certificate search completed successfully")
+                else:
+                    results = [{
+                        'type': 'SSL Certificate',
+                        'error': str(cert_data) if isinstance(cert_data, str) else cert_data.get('error', 'Unknown error'),
+                        'status': cert_data.get('status', 'Error') if isinstance(cert_data, dict) else 'Error',
+                        'message': cert_data.get('message', 'Unable to retrieve certificate data') if isinstance(cert_data, dict) else str(cert_data)
+                    }]
+                    logging.warning("[TASK] Certificate search completed with errors")
             else:
-                results = [{
-                    'type': 'SSL Certificate',
-                    'error': str(cert_data) if isinstance(cert_data, str) else cert_data.get('error', 'Unknown error'),
-                    'status': cert_data.get('status', 'Error') if isinstance(cert_data, dict) else 'Error',
-                    'message': cert_data.get('message', 'Unable to retrieve certificate data') if isinstance(cert_data, dict) else str(cert_data)
-                }]
-        else:
-            return jsonify({'error': 'Invalid search type'}), 400
+                return jsonify({'error': 'Invalid search type'}), 400
+                
+        except Exception as e:
+            logging.error(f"[TASK] Error during {search_type} search: {str(e)}")
+            raise
             
-        app.logger.debug(f"Search results: {results}")
+        finally:
+            # Clean up resources
+            driver_pool.cleanup_all()
+            logging.info("[TASK] WebDriver pool cleaned up")
+            
+            # Log completion time and duration
+            task_completed = datetime.now(timezone.utc)
+            duration = (task_completed - task_started).total_seconds()
+            logging.info(f"[TASK] Search completed at {task_completed} (took {duration:.2f} seconds)")
+            
+        logging.debug(f"[TASK] Search results: {results}")
         return jsonify(results)
             
     except Exception as e:

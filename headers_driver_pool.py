@@ -5,15 +5,16 @@ import logging
 import threading
 from queue import Queue, Empty
 import time
+import psutil
 
-class WebDriverPool:
+class HeadersWebDriverPool:
     _instance = None
     _lock = threading.Lock()
     
     def __new__(cls):
         with cls._lock:
             if cls._instance is None:
-                cls._instance = super(WebDriverPool, cls).__new__(cls)
+                cls._instance = super(HeadersWebDriverPool, cls).__new__(cls)
                 cls._instance._initialized = False
             return cls._instance
     
@@ -23,60 +24,56 @@ class WebDriverPool:
             
         self._initialized = True
         self.pool = Queue()
-        self.max_drivers = 5  # Increased maximum concurrent drivers
+        self.max_drivers = 3  # Smaller pool for headers
         self.current_drivers = 0
         self.pool_lock = threading.Lock()
-        self.driver_timeouts = {}  # Track last usage time of drivers
+        self.driver_timeouts = {}
         self.cleanup_interval = 300  # 5 minutes
         self.last_cleanup = time.time()
         
     def _create_driver(self):
-        """Create a new Chrome WebDriver instance with standard options"""
+        """Create a new Chrome WebDriver instance optimized for header retrieval"""
         chrome_options = Options()
-        
-        # Core settings
-        chrome_options.binary_location = '/usr/bin/google-chrome-stable'
         chrome_options.add_argument('--headless=new')
         chrome_options.add_argument('--no-sandbox')
         chrome_options.add_argument('--disable-dev-shm-usage')
-        
-        # Process model settings
-        chrome_options.add_argument('--process-per-site')  # More stable than single-process
-        chrome_options.add_argument('--disable-renderer-backgrounding')
-        
-        # Memory and performance
         chrome_options.add_argument('--disable-gpu')
         chrome_options.add_argument('--disable-extensions')
-        chrome_options.add_argument('--disable-background-networking')
-        chrome_options.add_argument('--disable-background-timer-throttling')
-        chrome_options.add_argument('--disable-backgrounding-occluded-windows')
-        
-        # Stability improvements
-        chrome_options.add_argument('--disable-breakpad')
-        chrome_options.add_argument('--disable-crash-reporter')
-        chrome_options.add_argument('--disable-in-process-stack-traces')
-        
-        # Logging and debugging
         chrome_options.add_argument('--disable-logging')
         chrome_options.add_argument('--log-level=3')
-        chrome_options.add_argument('--silent-debugger-extension-api')
-        
-        # Browser settings
+        chrome_options.add_argument('--disable-javascript')  # Disable JS for faster loading
         chrome_options.add_argument('--window-size=1920,1080')
-        chrome_options.add_argument('--hide-scrollbars')
-        chrome_options.add_argument('--mute-audio')
-        chrome_options.add_argument('--blink-settings=imagesEnabled=false')  # Disable images for faster loading
         chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36')
-        
-        # Page load strategy
         chrome_options.page_load_strategy = 'eager'
+        chrome_options.add_argument('--memory-pressure-off')
+        chrome_options.add_argument('--single-process')
         
         service = Service()
         driver = webdriver.Chrome(service=service, options=chrome_options)
-        driver.set_page_load_timeout(30)
+        driver.set_page_load_timeout(15)  # Shorter timeout for headers
         return driver
         
-    def get_driver(self, timeout=10):
+    def _get_memory_usage(self):
+        """Get current memory usage of the process"""
+        process = psutil.Process()
+        return process.memory_info().rss / 1024 / 1024  # Convert to MB
+
+    def _check_memory_threshold(self):
+        """Check if memory usage is above threshold"""
+        memory_usage = self._get_memory_usage()
+        memory_threshold = 512  # Lower threshold (512MB) for headers pool
+        return memory_usage > memory_threshold
+
+    def _check_driver_health(self, driver):
+        """Check if a WebDriver instance is still healthy"""
+        try:
+            # Simple health check - try to access a property
+            _ = driver.current_url
+            return True
+        except Exception:
+            return False
+
+    def get_driver(self, timeout=5):  # Shorter timeout for headers
         """Get a WebDriver instance from the pool or create a new one"""
         try:
             # Check memory usage and cleanup if needed
@@ -91,9 +88,9 @@ class WebDriverPool:
             if not self._check_driver_health(driver):
                 logging.warning("Retrieved unhealthy driver, cleaning up and retrying")
                 self._cleanup_driver(driver)
-                return self.get_driver(timeout)  # Recursive retry
+                return self.get_driver(timeout)
                 
-            logging.debug("Retrieved existing WebDriver from pool")
+            logging.debug("Retrieved existing WebDriver from headers pool")
             return driver
             
         except Empty:
@@ -110,7 +107,7 @@ class WebDriverPool:
                             raise TimeoutError("Memory usage too high and no drivers available")
                     
                     self.current_drivers += 1
-                    logging.debug(f"Creating new WebDriver (total: {self.current_drivers})")
+                    logging.debug(f"Creating new WebDriver for headers (total: {self.current_drivers})")
                     driver = self._create_driver()
                     self.driver_timeouts[id(driver)] = time.time()
                     return driver
@@ -121,28 +118,6 @@ class WebDriverPool:
                         return self.pool.get(timeout=timeout)
                     except Empty:
                         raise TimeoutError("No WebDriver instance available within timeout period")
-    
-    def _check_driver_health(self, driver):
-        """Check if a WebDriver instance is still healthy"""
-        try:
-            # Simple health check - try to access a property
-            _ = driver.current_url
-            return True
-        except Exception:
-            return False
-
-    def _perform_cleanup(self):
-        """Perform periodic cleanup of old drivers"""
-        current_time = time.time()
-        if current_time - self.last_cleanup < self.cleanup_interval:
-            return
-
-        with self.pool_lock:
-            # Clean up old drivers
-            for driver_id, last_used in list(self.driver_timeouts.items()):
-                if current_time - last_used > self.cleanup_interval:
-                    self._cleanup_driver(driver_id)
-            self.last_cleanup = current_time
 
     def return_driver(self, driver):
         """Return a WebDriver instance to the pool"""
@@ -150,7 +125,7 @@ class WebDriverPool:
             try:
                 # Check driver health before returning to pool
                 if not self._check_driver_health(driver):
-                    logging.warning("Unhealthy driver detected, cleaning up")
+                    logging.warning("Unhealthy driver detected in headers pool, cleaning up")
                     self._cleanup_driver(driver)
                     return
 
@@ -163,50 +138,74 @@ class WebDriverPool:
                 self.driver_timeouts[id(driver)] = time.time()
                 
                 self.pool.put(driver)
-                logging.debug("Returned WebDriver to pool")
+                logging.debug("Returned WebDriver to headers pool")
                 
-                # Perform periodic cleanup
-                self._perform_cleanup()
             except Exception as e:
-                logging.error(f"Error returning driver to pool: {str(e)}")
+                logging.error(f"Error returning driver to headers pool: {str(e)}")
                 self._cleanup_driver(driver)
-    
-    def _get_memory_usage(self):
-        """Get current memory usage of the process"""
-        import psutil
-        process = psutil.Process()
-        return process.memory_info().rss / 1024 / 1024  # Convert to MB
-
-    def _check_memory_threshold(self):
-        """Check if memory usage is above threshold"""
-        memory_usage = self._get_memory_usage()
-        memory_threshold = 1024  # 1GB threshold
-        return memory_usage > memory_threshold
 
     def _cleanup_driver(self, driver):
-        """Clean up a WebDriver instance"""
-        if driver:
+        """Clean up a WebDriver instance with enhanced error recovery"""
+        if not driver:
+            return
+            
+        driver_id = id(driver)
+        cleanup_success = False
+        
+        try:
+            # Try to close all windows first
             try:
-                # Force garbage collection before cleanup
-                import gc
-                gc.collect()
-                
-                # Quit the driver
+                if hasattr(driver, 'window_handles'):
+                    for handle in driver.window_handles:
+                        driver.switch_to.window(handle)
+                        driver.close()
+            except Exception as e:
+                logging.debug(f"Error closing windows: {str(e)}")
+            
+            # Try to clear browser data
+            try:
+                driver.execute_script("window.localStorage.clear();")
+                driver.execute_script("window.sessionStorage.clear();")
+                driver.delete_all_cookies()
+            except Exception as e:
+                logging.debug(f"Error clearing browser data: {str(e)}")
+            
+            # Try to quit the driver
+            try:
                 driver.quit()
+                cleanup_success = True
+            except Exception as e:
+                logging.warning(f"Error quitting driver: {str(e)}")
                 
-                # Remove from timeouts tracking
-                driver_id = id(driver)
+            # If normal quit failed, try force quit
+            if not cleanup_success:
+                try:
+                    import psutil
+                    process = psutil.Process(driver.service.process.pid)
+                    for child in process.children(recursive=True):
+                        child.terminate()
+                    process.terminate()
+                    cleanup_success = True
+                except Exception as e:
+                    logging.error(f"Error force quitting driver: {str(e)}")
+                    
+        except Exception as e:
+            logging.error(f"Error in driver cleanup: {str(e)}")
+        finally:
+            with self.pool_lock:
+                self.current_drivers -= 1
                 if driver_id in self.driver_timeouts:
                     del self.driver_timeouts[driver_id]
                     
-            except Exception as e:
-                logging.warning(f"Error cleaning up driver: {str(e)}")
-            finally:
-                with self.pool_lock:
-                    self.current_drivers -= 1
-                    
-                # Force garbage collection after cleanup
+            # Force garbage collection after cleanup
+            try:
+                import gc
                 gc.collect()
+            except Exception as e:
+                logging.debug(f"Error in garbage collection: {str(e)}")
+                
+            if not cleanup_success:
+                logging.warning("Driver cleanup may have left orphaned processes")
                     
     def cleanup_all(self):
         """Clean up all WebDriver instances in the pool"""
@@ -218,6 +217,7 @@ class WebDriverPool:
                 break
         with self.pool_lock:
             self.current_drivers = 0
+            self.driver_timeouts.clear()
 
 # Global instance
-driver_pool = WebDriverPool()
+headers_driver_pool = HeadersWebDriverPool()

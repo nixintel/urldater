@@ -14,11 +14,90 @@ import logging
 from urllib.parse import urlparse
 import time
 
+# Configure module logger
+logger = logging.getLogger(__name__)
+logger.addHandler(logging.NullHandler())  # Allow parent logger to handle output
+
+def log_prefix(func_name):
+    """Create a consistent log prefix"""
+    return f"[HEADERS] {func_name}:"
+
 def format_datetime(dt):
     """Format datetime to DD-MM-YYYY HH:mm:ss Z"""
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     return dt.strftime('%d-%m-%Y %H:%M:%S %Z')
+
+async def get_media_dates_fallback(url):
+    """Fallback method that uses pure aiohttp without WebDriver"""
+    logging.info(f"Using aiohttp fallback for URL: {url}")
+    
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as response:
+                if response.status >= 400:
+                    return [{
+                        'type': 'Error',
+                        'error': f'HTTP error {response.status}',
+                        'message': 'Failed to fetch the page'
+                    }]
+                
+                # Parse response headers for Link tags
+                content_type = response.headers.get('Content-Type', '').lower()
+                if 'text/html' in content_type:
+                    html = await response.text()
+                    from bs4 import BeautifulSoup
+                    soup = BeautifulSoup(html, 'html.parser')
+                    
+                    # Find all image and icon links
+                    media_urls = set()
+                    
+                    # Add favicon links
+                    for link in soup.find_all('link', rel=lambda x: x and ('icon' in x.lower() or 'shortcut' in x.lower())):
+                        if 'href' in link.attrs:
+                            media_urls.add(link['href'])
+                    
+                    # Add image sources
+                    for img in soup.find_all('img'):
+                        if 'src' in img.attrs:
+                            media_urls.add(img['src'])
+                    
+                    # Process each media URL
+                    results = []
+                    for media_url in media_urls:
+                        if media_url.startswith('data:'):
+                            continue
+                            
+                        # Make URL absolute if needed
+                        if not media_url.startswith(('http://', 'https://')):
+                            from urllib.parse import urljoin
+                            media_url = urljoin(url, media_url)
+                        
+                        last_modified = await get_last_modified(session, media_url)
+                        if last_modified:
+                            results.append({
+                                'type': 'image' if any(ext in media_url.lower() for ext in ['.jpg', '.jpeg', '.png', '.gif']) else 'favicon',
+                                'url': media_url,
+                                'last_modified': format_datetime(last_modified)
+                            })
+                    
+                    return results if results else [{
+                        'type': 'Info',
+                        'message': 'No media files with last-modified dates found'
+                    }]
+                else:
+                    return [{
+                        'type': 'Error',
+                        'error': 'Invalid content type',
+                        'message': 'The URL does not point to a web page'
+                    }]
+    except Exception as e:
+        logging.error(f"Error in fallback method: {str(e)}")
+        return [{
+            'type': 'Error',
+            'error': str(e),
+            'message': 'Failed to fetch the page'
+        }]
 
 async def get_last_modified(session, url):
     try:
@@ -103,48 +182,66 @@ def get_elements_with_retry(driver, by, value, max_retries=3, timeout=10):
     return []
 
 async def get_media_dates(url):
-    logging.info(f"Starting get_media_dates for URL: {url}")
+    prefix = log_prefix("get_media_dates")
+    logger.info(f"{prefix} Starting for URL: {url}")
     
-    from chrome_driver_pool import driver_pool
+    from headers_driver_pool import headers_driver_pool
     
     results = []
     driver = None
+    max_retries = 2  # Fewer retries for headers
+    session_id = None  # Track session ID for debugging
+    
+    # First try the aiohttp approach as it's faster and lighter
+    try:
+        results = await get_media_dates_fallback(url)
+        if results and not (len(results) == 1 and results[0].get('type') in ['Error', 'Info']):
+            logging.info("Successfully got results using aiohttp fallback")
+            return results
+    except Exception as e:
+        logging.warning(f"Fallback method failed, will try WebDriver: {str(e)}")
     
     try:
-        logging.info("Getting WebDriver from pool")
-        driver = driver_pool.get_driver()
-        
-        logging.info(f"Fetching URL: {url}")
-        try:
-            driver.get(url)
-        except WebDriverException as e:
-            error_message = str(e).lower()
-            if 'err_name_not_resolved' in error_message:
-                return [{
-                    'type': 'Error',
-                    'error': 'Unable to connect to the provided URL. The website may be offline or inaccessible.'
-                }]
-            elif 'err_connection_refused' in error_message:
-                return [{
-                    'type': 'Error',
-                    'error': 'Connection refused. The website is not accepting connections.'
-                }]
-            elif 'err_connection_timed_out' in error_message:
-                return [{
-                    'type': 'Error',
-                    'error': 'Connection timed out. The website took too long to respond.'
-                }]
-            elif 'err_ssl_protocol_error' in error_message:
-                return [{
-                    'type': 'Error',
-                    'error': 'SSL/TLS error. Could not establish a secure connection to the website.'
-                }]
-            else:
-                # For other WebDriver errors, return a generic message
-                return [{
-                    'type': 'Error',
-                    'error': 'Unable to connect to the website. Please check if the URL is correct and the website is accessible.'
-                }]
+        for attempt in range(max_retries):
+            if driver is None:
+                logging.info("Getting WebDriver from pool")
+                try:
+                    driver = headers_driver_pool.get_driver()
+                    if driver:
+                        session_id = driver.session_id
+                        logging.info(f"Got WebDriver with session ID: {session_id}")
+                except TimeoutError:
+                    logging.error("Could not get WebDriver from pool")
+                    return results if results else await get_media_dates_fallback(url)
+                except Exception as e:
+                    logging.error(f"Error getting WebDriver: {str(e)}")
+                    return results if results else await get_media_dates_fallback(url)
+            
+            logging.info(f"Fetching URL: {url}")
+            try:
+                driver.set_page_load_timeout(15)  # Short timeout for headers
+                driver.get(url)
+            except WebDriverException as e:
+                error_message = str(e).lower()
+                if any(err in error_message for err in [
+                    'err_name_not_resolved',
+                    'err_connection_refused',
+                    'err_connection_timed_out',
+                    'err_ssl_protocol_error'
+                ]):
+                    # For connection errors, try aiohttp approach
+                    if driver:
+                        headers_driver_pool.return_driver(driver)
+                        driver = None
+                    return await get_media_dates_fallback(url)
+                else:
+                    # For other WebDriver errors, retry with a new driver
+                    if driver:
+                        headers_driver_pool.return_driver(driver)
+                        driver = None
+                    if attempt == max_retries - 1:
+                        return await get_media_dates_fallback(url)
+                    continue
         
         try:
             WebDriverWait(driver, 10).until(
@@ -305,10 +402,23 @@ async def get_media_dates(url):
     finally:
         if driver:
             try:
-                driver_pool.return_driver(driver)
-                logging.info("WebDriver returned to pool")
+                # Verify session is still valid before returning
+                try:
+                    if driver.session_id == session_id:
+                        headers_driver_pool.return_driver(driver)
+                        logging.info(f"WebDriver with session ID {session_id} returned to pool")
+                    else:
+                        logging.warning(f"Session ID mismatch: expected {session_id}, got {driver.session_id}")
+                        headers_driver_pool._cleanup_driver(driver)
+                except Exception:
+                    logging.warning("Could not verify session ID, forcing cleanup")
+                    headers_driver_pool._cleanup_driver(driver)
             except Exception as e:
-                logging.warning(f"Error returning WebDriver to pool: {str(e)}")
+                logging.warning(f"Error handling WebDriver cleanup: {str(e)}")
+                try:
+                    headers_driver_pool._cleanup_driver(driver)
+                except Exception as e2:
+                    logging.error(f"Final cleanup attempt failed: {str(e2)}")
     
     logging.info(f"Returning {len(results)} results")
     return results

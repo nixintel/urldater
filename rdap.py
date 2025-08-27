@@ -5,6 +5,14 @@ import logging
 import asyncio
 from datetime import datetime, timezone
 
+# Configure module logger
+logger = logging.getLogger(__name__)
+logger.addHandler(logging.NullHandler())  # Allow parent logger to handle output
+
+def log_prefix(func_name):
+    """Create a consistent log prefix"""
+    return f"[RDAP] {func_name}:"
+
 def format_datetime(dt):
     """Format datetime to DD-MM-YYYY HH:mm:ss Z"""
     if dt.tzinfo is None:
@@ -12,14 +20,15 @@ def format_datetime(dt):
     return dt.strftime('%d-%m-%Y %H:%M:%S %Z')
 
 def get_domain_info(url):
-    logging.info("Starting get_domain_info function")
+    prefix = log_prefix("get_domain_info")
+    logger.info(f"{prefix} Starting function")
     try:
         parsed_url = urlparse(url)
         domain = parsed_url.netloc
         if domain.startswith('www.'):
             domain = domain[4:]
         
-        logging.info(f"Looking up RDAP info for domain: {domain}")
+        logger.info(f"[RDAP] get_domain_info: Looking up info for domain: {domain}")
         
         # Run the rdap command with improved output capture
         try:

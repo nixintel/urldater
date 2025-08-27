@@ -13,8 +13,13 @@ import logging
 import asyncio
 from datetime import datetime
 
-logging.basicConfig(level=logging.DEBUG)
+# Configure module logger
 logger = logging.getLogger(__name__)
+logger.addHandler(logging.NullHandler())  # Allow parent logger to handle output
+
+def log_prefix(func_name):
+    """Create a consistent log prefix"""
+    return f"[CERTS] {func_name}:"
 
 def extract_main_domain(url):
     """Extract the main domain from a URL, ignoring subdomains."""
@@ -35,23 +40,46 @@ def parse_certificate_data(html_content):
     
     if not html_content:
         logging.warning("Received empty HTML content")
-        return None
+        return {
+            'type': 'SSL Certificate',
+            'error': 'Empty Response',
+            'status': 'Error',
+            'message': 'No data received from crt.sh'
+        }
         
     # Check if response is an error page
-    error_indicators = [
-        "<!DOCTYPE html>",
-        "524 Origin Time-out",
-        "Gateway Time-out",
-        "Bad Gateway",
-        "Service Unavailable"
-    ]
+    error_indicators = {
+        "<!DOCTYPE html>": "Invalid response format",
+        "524 Origin Time-out": "Service timeout",
+        "Gateway Time-out": "Gateway timeout",
+        "Bad Gateway": "Bad gateway error",
+        "Service Unavailable": "Service unavailable",
+        "Too Many Requests": "Rate limited",
+        "Please try again later": "Service overloaded",
+        "maintenance": "Site under maintenance"
+    }
     
     if isinstance(html_content, str):
         html_lower = html_content.lower()
-        for indicator in error_indicators:
+        for indicator, error_msg in error_indicators.items():
             if indicator.lower() in html_lower:
-                logging.error(f"Received error page: {indicator}")
-                return None
+                error_response = {
+                    'type': 'SSL Certificate',
+                    'error': error_msg,
+                    'status': 'Error',
+                    'message': f'crt.sh returned an error: {error_msg}'
+                }
+                logging.error(f"Received error page: {error_msg}")
+                return error_response
+                
+        # Check for non-table response (usually means no certificates found)
+        if "<table" not in html_lower:
+            return {
+                'type': 'SSL Certificate',
+                'error': 'No Certificates Found',
+                'status': 'Not Found',
+                'message': 'No SSL certificates found for this domain'
+            }
         
     try:
         soup = BeautifulSoup(html_content, 'html.parser')
@@ -154,16 +182,40 @@ def check_crtsh_status(driver, timeout=30):
     Returns tuple of (is_up, error_message)
     """
     try:
-        # First try a quick check with shorter timeout
-        driver.set_page_load_timeout(10)
+        # Set initial timeout
+        driver.set_page_load_timeout(timeout)
+        
+        # Clear any existing state
+        driver.delete_all_cookies()
+        
+        # Try to access crt.sh directly
         try:
             driver.get("https://crt.sh")
-        except Exception:
-            # If quick check fails, try again with longer timeout
-            driver.set_page_load_timeout(timeout)
+            
+            # Wait for page to be interactive
+            WebDriverWait(driver, 10).until(
+                lambda d: d.execute_script('return document.readyState') == 'complete'
+            )
+            
+            # Verify we can interact with the page
             try:
+                driver.find_element(By.TAG_NAME, 'body')
+            except Exception:
+                return False, {
+                    'type': 'SSL Certificate',
+                    'error': 'Page not interactive',
+                    'status': 'Service Error',
+                    'message': 'Could not interact with crt.sh. The service may be experiencing issues.'
+                }
+                
+        except Exception as e:
+            logging.error(f"Error accessing crt.sh: {str(e)}")
+            # If direct access fails, try with a new session
+            try:
+                driver.quit()
+                driver = driver_pool._create_driver()
                 driver.get("https://crt.sh")
-            except Exception as e:
+            except Exception as e2:
                 return False, {
                     'type': 'SSL Certificate',
                     'error': 'Unable to connect to certificate service',
@@ -219,7 +271,8 @@ async def get_first_certificate(domain):
     Connect to crt.sh and attempt to retrieve certificate information.
     Returns tuple of (success, result), where result is either the data or error message.
     """
-    logging.debug(f"Starting certificate search for domain: {domain}")
+    prefix = log_prefix("get_first_certificate")
+    logger.debug(f"{prefix} Starting search for domain: {domain}")
     
     from chrome_driver_pool import driver_pool
     
@@ -261,25 +314,33 @@ async def get_first_certificate(domain):
                         'message': 'Unable to connect to crt.sh to retrieve certificate history. The site may be offline.'
                     }
                 
-                # If initial check passed, set longer timeout for actual query
-                driver.set_page_load_timeout(timeout)
+                # Progressive timeout strategy
+                timeouts = [15, 30, 45]  # Progressive timeouts
                 url = f"https://crt.sh/?q={domain}"
                 logging.debug(f"Accessing URL: {url}")
                 
-                try:
-                    driver.get(url)
-                except TimeoutException:
-                    logging.warning("Initial quick attempt timed out, trying with longer timeout")
-                    # If quick attempt fails, try one more time with full timeout
+                for attempt_timeout in timeouts:
                     try:
+                        driver.set_page_load_timeout(attempt_timeout)
+                        logging.debug(f"Attempting with {attempt_timeout}s timeout")
+                        
+                        # Add exponential backoff between attempts
+                        if timeouts.index(attempt_timeout) > 0:
+                            backoff = 2 ** (timeouts.index(attempt_timeout) - 1)
+                            logging.debug(f"Backing off for {backoff} seconds")
+                            time.sleep(backoff)
+                        
                         driver.get(url)
-                    except TimeoutException as e:
-                        return False, {
-                            'type': 'SSL Certificate',
-                            'error': str(e),
-                            'status': 'Timeout',
-                            'message': 'Unable to retrieve certificate data. The crt.sh website is responding too slowly.'
-                        }
+                        break  # If successful, exit the loop
+                    except TimeoutException:
+                        if attempt_timeout == timeouts[-1]:  # If this was the last attempt
+                            return False, {
+                                'type': 'SSL Certificate',
+                                'error': 'Maximum timeout reached',
+                                'status': 'Timeout',
+                                'message': 'Unable to retrieve certificate data. The crt.sh website is not responding within the allowed time.'
+                            }
+                        logging.warning(f"Attempt with {attempt_timeout}s timeout failed, will retry")
                 
                 # Wait for initial table to load with a more specific selector
                 logging.debug("Waiting for table to load...")
