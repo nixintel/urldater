@@ -56,15 +56,13 @@ async def analyze():
             logging.error(f"Failed to parse JSON data: {str(e)}")
             return jsonify({'error': 'Invalid JSON format'}), 400
             
-        logging.debug(f"Received data: {data}")
-        
         if not data or 'url' not in data:
             logging.error("No URL provided")
             return jsonify({'error': 'No URL provided'}), 400
         
         url = data['url']
         search_type = data.get('searchType', 'all')  # Default to 'all' if not specified
-        logging.debug(f"Processing URL: {url} with search type: {search_type}")
+        logging.info(f"[ANALYZE] Processing {search_type} search for URL: {url}")
         
         if not validators.url(url):
             logging.error(f"Invalid URL format: {url}")
@@ -193,8 +191,9 @@ async def analyze():
                 return jsonify(all_results)
                 
             elif search_type == 'rdap':
-                logging.debug("Getting domain info...")
+                logging.info("[ANALYZE] Starting RDAP lookup")
                 results = get_domain_info(url)
+                logging.info("[ANALYZE] RDAP lookup completed")
                 return jsonify(results if results else [])
                 
             elif search_type == 'headers':

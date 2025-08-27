@@ -35,6 +35,8 @@ async def get_media_dates_fallback(url):
     try:
         async with aiohttp.ClientSession() as session:
             async with session.get(url) as response:
+                logging.info(f"Attempting to connect to {url}")
+                logging.info(f"Connection status: {response.status}")
                 if response.status >= 400:
                     return [{
                         'type': 'Error',

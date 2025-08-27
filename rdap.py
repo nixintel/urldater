@@ -60,11 +60,13 @@ def get_domain_info(url):
                 'error': 'No RDAP data could be found for this domain. Check this TLD supports RDAP queries.'
             }]
         
-        # Log the raw output for debugging
-        logging.debug(f"Raw RDAP output: {result.stdout}")
+        # Log truncated output for debugging
+        if result.stdout:
+            truncated = result.stdout[:5] + "..." if len(result.stdout) > 200 else result.stdout
+            logger.debug(f"{prefix} RDAP output preview: {truncated}")
         
         if not result.stdout.strip():
-            logging.error("OpenRDAP returned empty output")
+            logger.error(f"{prefix} OpenRDAP returned empty output")
             return [{
                 'type': 'Error',
                 'url': f"https://rdap.org/domain/{domain}",
@@ -75,7 +77,7 @@ def get_domain_info(url):
         try:
             # Check for HTML or error page content
             if "<!DOCTYPE html>" in result.stdout or "<html" in result.stdout:
-                logging.error("Received HTML response instead of RDAP data")
+                logger.error(f"{prefix} Received HTML response instead of RDAP data")
                 return [{
                     'type': 'Error',
                     'url': f"https://rdap.org/domain/{domain}",
@@ -92,7 +94,7 @@ def get_domain_info(url):
                 
             # Validate JSON structure before parsing
             if not json_text.startswith('{'):
-                logging.error(f"Invalid JSON format received: {json_text[:100]}")
+                logger.error(f"{prefix} Invalid JSON format received")
                 return [{
                     'type': 'Error',
                     'url': f"https://rdap.org/domain/{domain}",
@@ -104,11 +106,9 @@ def get_domain_info(url):
             if "RDAP from Registrar:" in json_text:
                 json_text = json_text.split("RDAP from Registrar:")[0].strip()
             
-            logging.debug(f"Cleaned JSON text: {json_text}")
-            
             # Parse the JSON output
             rdap_data = json.loads(json_text)
-            logging.debug(f"Successfully parsed RDAP JSON data")
+            logger.debug(f"{prefix} Successfully parsed RDAP data with keys: {list(rdap_data.keys())}")
             
             # Get the RDAP URL from links
             rdap_url = None
@@ -125,13 +125,11 @@ def get_domain_info(url):
             
             if 'events' in rdap_data:
                 events = rdap_data['events']
-                logging.debug(f"Found {len(events)} events")
+                logger.debug(f"{prefix} Processing {len(events)} events")
                 
                 for event in events:
                     event_action = event.get('eventAction', '')
                     event_date = event.get('eventDate', '')
-                    
-                    logging.debug(f"Processing event - Action: {event_action}, Date: {event_date}")
                     
                     if event_action and event_date:
                         try:
@@ -142,41 +140,40 @@ def get_domain_info(url):
                             if event_action == 'registration':
                                 entry = {
                                     'type': 'Registered',
-                                    'url': rdap_url,  # Using RDAP URL instead of domain tools
+                                    'url': rdap_url,
                                     'registered': formatted_date,
                                     'last_modified': formatted_date,
                                     '_registered_dt': parsed_date
                                 }
-                                logging.debug(f"Adding registration entry: {entry}")
+                                logger.info(f"{prefix} Found registration date: {formatted_date}")
                                 domain_info.append(entry)
                             elif event_action == 'last changed':
                                 entry = {
                                     'type': 'Updated',
-                                    'url': rdap_url,  # Using RDAP URL instead of domain tools
+                                    'url': rdap_url,
                                     'updated': formatted_date,
                                     'last_modified': formatted_date,
                                     '_updated_dt': parsed_date
                                 }
-                                logging.debug(f"Adding last changed entry: {entry}")
+                                logger.info(f"{prefix} Found last modified date: {formatted_date}")
                                 domain_info.append(entry)
                         except ValueError as e:
-                            logging.error(f"Error parsing date {event_date}: {e}")
+                            logger.error(f"{prefix} Error parsing date {event_date}: {e}")
             else:
-                logging.warning("No events found in RDAP data")
-                logging.debug(f"Available keys in RDAP data: {list(rdap_data.keys())}")
+                logger.warning(f"{prefix} No events found in RDAP data. Available keys: {list(rdap_data.keys())}")
             
             return domain_info
             
         except json.JSONDecodeError as e:
-            logging.error(f"Failed to parse JSON: {e}")
-            logging.error(f"Raw output causing error: {result.stdout}")
+            logger.error(f"{prefix} Failed to parse JSON: {e}")
+            # Log only the first part of the problematic output
+            if result.stdout:
+                preview = result.stdout[:100] + "..." if len(result.stdout) > 100 else result.stdout
+                logger.error(f"{prefix} Invalid JSON preview: {preview}")
             return []
             
     except Exception as e:
-        logging.error(f"Error in get_domain_info: {e}")
-        logging.error(f"Full error: {str(e.__class__.__name__)}: {str(e)}")
-        import traceback
-        logging.error(f"Traceback: {traceback.format_exc()}")
+        logger.error(f"{prefix} Error in get_domain_info: {str(e.__class__.__name__)}: {str(e)}")
         return []
 
 if __name__ == "__main__":

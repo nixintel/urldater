@@ -1,24 +1,17 @@
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException, WebDriverException
 from urllib.parse import urlparse
-from bs4 import BeautifulSoup
-import time
 import argparse
 import logging
 import asyncio
-from datetime import datetime
+import aiohttp
+import json
+from datetime import datetime, timezone
 
 # Configure module logger
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.NullHandler())  # Allow parent logger to handle output
 
 def log_prefix(func_name):
-    """Create a consistent log prefix"""
+    """Create a consistent log prefix for easier debugging"""
     return f"[CERTS] {func_name}:"
 
 def extract_main_domain(url):
@@ -29,236 +22,107 @@ def extract_main_domain(url):
     parsed = urlparse(url)
     domain_parts = parsed.netloc.split('.')
     
-    # Handle cases like co.uk, com.au, etc.
+    # Handle cases like co.uk, com.au, etc. Think this is all of them? TODO: check this.
     if len(domain_parts) > 2 and domain_parts[-2] in ['co', 'com', 'org', 'net']:
         return '.'.join(domain_parts[-3:])
     return '.'.join(domain_parts[-2:])
 
-def parse_certificate_data(html_content):
-    """Parse the HTML content from crt.sh and extract certificate information."""
-    logging.debug("Starting to parse certificate data")
+async def get_certificate_json(domain):
+    """Get certificate data from crt.sh JSON API."""
+    prefix = log_prefix("get_certificate_json")
+    logger.debug(f"{prefix} Fetching JSON data for domain: {domain}")
     
-    if not html_content:
-        logging.warning("Received empty HTML content")
+    url = f"https://crt.sh/?q={domain}&output=json"
+    logger.debug(f"{prefix} Connecting to {url}...")
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as response:
+                
+                if response.status != 200:
+                    logger.error(f"{prefix} Error response from crt.sh: {response.status}")
+                    return {
+                        'type': 'SSL Certificate',
+                        'error': f'HTTP {response.status}',
+                        'status': 'Error',
+                        'message': 'Failed to retrieve certificate data from crt.sh'
+                    }
+                
+                try:
+                    certs = await response.json()
+                except json.JSONDecodeError as e:
+                    logger.error(f"{prefix} Failed to parse JSON response: {e}")
+                    return {
+                        'type': 'SSL Certificate',
+                        'error': 'Invalid JSON response',
+                        'status': 'Error',
+                        'message': 'Invalid response format from crt.sh'
+                    }
+                
+                if not certs:
+                    logger.warning(f"{prefix} No certificates found")
+                    return {
+                        'type': 'SSL Certificate',
+                        'error': 'No Certificates Found',
+                        'status': 'Not Found',
+                        'message': 'No SSL certificates found for this domain'
+                    }
+                
+                # Sort by entry_timestamp to get the oldest certificate
+                certs.sort(key=lambda x: x['entry_timestamp'])
+                oldest_cert = certs[0]
+                
+                # Convert dates to the standard format 
+                entry_date = datetime.fromisoformat(oldest_cert['entry_timestamp'].replace('Z', '+00:00'))
+                valid_from = datetime.fromisoformat(oldest_cert['not_before'].replace('Z', '+00:00'))
+                
+                cert_data = {
+                    'type': 'SSL Certificate',
+                    'Common Name': oldest_cert['common_name'],
+                    'First Seen': entry_date.strftime('%d-%m-%Y'),
+                    'Valid From': valid_from.strftime('%d-%m-%Y'),
+                    'Source': f"https://crt.sh/?id={oldest_cert['id']}"
+                }
+                
+                logger.info(f"{prefix} Successfully retrieved certificate data: {cert_data}")
+                return cert_data
+                
+    except aiohttp.ClientError as e:
+        logger.error(f"{prefix} Connection error: {e}")
         return {
             'type': 'SSL Certificate',
-            'error': 'Empty Response',
+            'error': 'Connection Error',
             'status': 'Error',
-            'message': 'No data received from crt.sh'
+            'message': 'Failed to connect to crt.sh'
         }
-        
-    # Check if response is an error page
-    error_indicators = {
-        "<!DOCTYPE html>": "Invalid response format",
-        "524 Origin Time-out": "Service timeout",
-        "Gateway Time-out": "Gateway timeout",
-        "Bad Gateway": "Bad gateway error",
-        "Service Unavailable": "Service unavailable",
-        "Too Many Requests": "Rate limited",
-        "Please try again later": "Service overloaded",
-        "maintenance": "Site under maintenance"
-    }
-    
-    if isinstance(html_content, str):
-        html_lower = html_content.lower()
-        for indicator, error_msg in error_indicators.items():
-            if indicator.lower() in html_lower:
-                error_response = {
-                    'type': 'SSL Certificate',
-                    'error': error_msg,
-                    'status': 'Error',
-                    'message': f'crt.sh returned an error: {error_msg}'
-                }
-                logging.error(f"Received error page: {error_msg}")
-                return error_response
-                
-        # Check for non-table response (usually means no certificates found)
-        if "<table" not in html_lower:
-            return {
-                'type': 'SSL Certificate',
-                'error': 'No Certificates Found',
-                'status': 'Not Found',
-                'message': 'No SSL certificates found for this domain'
-            }
-        
-    try:
-        soup = BeautifulSoup(html_content, 'html.parser')
-        logging.debug("Created BeautifulSoup object")
-        
-        # Find all tables
-        tables = soup.find_all('table')
-        logging.debug(f"Found {len(tables)} tables")
-        
-        # The certificate data is typically in the table with the most rows
-        cert_table = None
-        max_rows = 0
-        
-        for i, table in enumerate(tables):
-            rows = table.find_all('tr')
-            logging.debug(f"Table {i} has {len(rows)} rows")
-            if len(rows) > max_rows:
-                max_rows = len(rows)
-                cert_table = table
-        
-        if not cert_table:
-            logging.warning("No tables found with rows")
-            return False  # Special case: page loaded but no certificates found
-            
-        rows = cert_table.find_all('tr')
-        logging.debug(f"Using table with {len(rows)} rows")
-        
-        if len(rows) < 2:  # Need at least header row and one data row
-            logging.warning("No certificate rows found")
-            return False  # Special case: page loaded but no certificates found
-        
-        # Get the last row (most recent certificate)
-        data_row = rows[-1]  # Get the last row
-        cells = data_row.find_all(['td', 'th'])
-        
-        logging.debug(f"Processing last row with {len(cells)} cells")
-        logging.debug(f"Cell contents: {[cell.text.strip() for cell in cells]}")
-        
-        if len(cells) < 6:  # crt.sh typically has at least 6 columns
-            logging.warning(f"Unexpected number of cells: {len(cells)}")
-            return False  # Special case: page loaded but no valid certificate data found
-            
-        try:
-            # Extract the certificate ID and create source URL
-            cert_id = None
-            id_link = cells[0].find('a')
-            if id_link and 'href' in id_link.attrs:
-                # Extract ID from href that looks like "?id=1234"
-                href = id_link['href']
-                cert_id = href.split('=')[-1] if '=' in href else None
-            
-            if not cert_id:
-                cert_id = cells[0].text.strip()
-            
-            source_url = f"https://crt.sh/?id={cert_id}"
-            
-            # Get other certificate details
-            logged_at = cells[1].text.strip()
-            not_before = cells[2].text.strip()
-            common_name = cells[4].text.strip()
-            
-            # Convert date format if needed
-            try:
-                logged_date = datetime.strptime(logged_at, '%Y-%m-%d')
-                logged_at = logged_date.strftime('%d-%m-%Y')
-            except ValueError:
-                logging.warning(f"Could not parse date format: {logged_at}")
-                # Keep original format if parsing fails
-            
-            try:
-                valid_from = datetime.strptime(not_before, '%Y-%m-%d')
-                not_before = valid_from.strftime('%d-%m-%Y')
-            except ValueError:
-                logging.warning(f"Could not parse date format: {not_before}")
-                # Keep original format if parsing fails
-            
-            cert_data = {
-                'type': 'SSL Certificate',
-                'Common Name': common_name,
-                'First Seen': logged_at,
-                'Valid From': not_before,
-                'Source': source_url
-            }
-            
-            logging.info(f"Successfully parsed certificate data: {cert_data}")
-            return cert_data
-            
-        except Exception as e:
-            logging.error(f"Error extracting cell data: {str(e)}")
-            logging.error(f"Row content: {data_row}")
-            return None
-            
     except Exception as e:
-        logging.error(f"Error parsing certificate data: {str(e)}")
-        return None
+        logger.error(f"{prefix} Unexpected error: {e}")
+        return {
+            'type': 'SSL Certificate',
+            'error': str(e),
+            'status': 'Error',
+            'message': 'An unexpected error occurred while retrieving certificate data'
+        }
 
-def check_crtsh_status(driver, timeout=30):
+async def check_crtsh_status():
     """
     Check if crt.sh is responding and not showing a server error.
     Returns tuple of (is_up, error_message)
     """
+    prefix = log_prefix("check_crtsh_status")
     try:
-        # Set initial timeout
-        driver.set_page_load_timeout(timeout)
-        
-        # Clear any existing state
-        driver.delete_all_cookies()
-        
-        # Try to access crt.sh directly
-        try:
-            driver.get("https://crt.sh")
-            
-            # Wait for page to be interactive
-            WebDriverWait(driver, 10).until(
-                lambda d: d.execute_script('return document.readyState') == 'complete'
-            )
-            
-            # Verify we can interact with the page
-            try:
-                driver.find_element(By.TAG_NAME, 'body')
-            except Exception:
-                return False, {
-                    'type': 'SSL Certificate',
-                    'error': 'Page not interactive',
-                    'status': 'Service Error',
-                    'message': 'Could not interact with crt.sh. The service may be experiencing issues.'
-                }
-                
-        except Exception as e:
-            logging.error(f"Error accessing crt.sh: {str(e)}")
-            # If direct access fails, try with a new session
-            try:
-                driver.quit()
-                driver = driver_pool._create_driver()
-                driver.get("https://crt.sh")
-            except Exception as e2:
-                return False, {
-                    'type': 'SSL Certificate',
-                    'error': 'Unable to connect to certificate service',
-                    'status': 'Service Unavailable',
-                    'message': 'The certificate service is currently unavailable. Please try again later.'
-                }
-        
-        # Check for common server error indicators
-        error_texts = [
-            "502 Bad Gateway",
-            "503 Service Temporarily Unavailable",
-            "504 Gateway Time-out",
-            "500 Internal Server Error",
-            "Database connection failed",
-            "Too Many Requests"
-        ]
-        
-        try:
-            # Use WebDriverWait to check for page load
-            WebDriverWait(driver, 5).until(
-                lambda d: len(d.page_source) > 0
-            )
-        except TimeoutException:
-            return False, {
-                'type': 'SSL Certificate',
-                'error': 'Service timeout',
-                'status': 'Timeout',
-                'message': 'The certificate service is taking too long to respond. Please try again later.'
-            }
-            
-        page_source = driver.page_source.lower()
-        for error in error_texts:
-            if error.lower() in page_source:
-                return False, {
-                    'type': 'SSL Certificate',
-                    'error': 'Service error',
-                    'status': 'Service Unavailable',
-                    'message': 'The certificate service is experiencing technical difficulties. Please try again later.'
-                }
-        
-        return True, None
-        
+        async with aiohttp.ClientSession() as session:
+            async with session.get("https://crt.sh") as response:
+                if response.status != 200:
+                    return False, {
+                        'type': 'SSL Certificate',
+                        'error': f'HTTP {response.status}',
+                        'status': 'Service Unavailable',
+                        'message': 'The certificate service is currently unavailable. Please try again later.'
+                    }
+                return True, None
     except Exception as e:
+        logger.error(f"{prefix} Error checking crt.sh status: {e}")
         return False, {
             'type': 'SSL Certificate',
             'error': 'Service unavailable',
@@ -270,267 +134,91 @@ async def get_first_certificate(domain):
     """
     Connect to crt.sh and attempt to retrieve certificate information.
     Returns tuple of (success, result), where result is either the data or error message.
+    Crt.sh is frequently down and gives 50x errors so we retry a few times.
     """
     prefix = log_prefix("get_first_certificate")
     logger.debug(f"{prefix} Starting search for domain: {domain}")
     
-    from chrome_driver_pool import driver_pool
-    
-    # Create event loop for async operations
-    loop = asyncio.get_event_loop()
-    
-    # Add more detailed logging
-    logging.debug("Chrome options configured")
-    
     max_retries = 3
-    timeout = 45  # Increased timeout to 45 seconds for better loading
     
-    try:
-        for attempt in range(max_retries):
-            driver = None
-            service = None
-            try:
-                logging.debug(f"Attempt {attempt + 1}/{max_retries} to get certificate data")
-                
-                # Get a driver from the pool
-                driver = driver_pool.get_driver()
-                logging.debug("Got WebDriver from pool")
-                
-                # Add a small delay between attempts
-                if attempt > 0:
-                    time.sleep(5)
-                
-                # Set initial shorter timeout for quick checks
-                driver.set_page_load_timeout(20)
-                
-                # Check if crt.sh is up and responding
-                is_up, error_message = check_crtsh_status(driver)
-                if not is_up:
-                    logging.error(error_message)
-                    return False, {
-                        'type': 'SSL Certificate',
-                        'error': error_message,
-                        'status': 'Service Unavailable',
-                        'message': 'Unable to connect to crt.sh to retrieve certificate history. The site may be offline.'
-                    }
-                
-                # Progressive timeout strategy
-                timeouts = [15, 30, 45]  # Progressive timeouts
-                url = f"https://crt.sh/?q={domain}"
-                logging.debug(f"Accessing URL: {url}")
-                
-                for attempt_timeout in timeouts:
-                    try:
-                        driver.set_page_load_timeout(attempt_timeout)
-                        logging.debug(f"Attempting with {attempt_timeout}s timeout")
-                        
-                        # Add exponential backoff between attempts
-                        if timeouts.index(attempt_timeout) > 0:
-                            backoff = 2 ** (timeouts.index(attempt_timeout) - 1)
-                            logging.debug(f"Backing off for {backoff} seconds")
-                            time.sleep(backoff)
-                        
-                        driver.get(url)
-                        break  # If successful, exit the loop
-                    except TimeoutException:
-                        if attempt_timeout == timeouts[-1]:  # If this was the last attempt
-                            return False, {
-                                'type': 'SSL Certificate',
-                                'error': 'Maximum timeout reached',
-                                'status': 'Timeout',
-                                'message': 'Unable to retrieve certificate data. The crt.sh website is not responding within the allowed time.'
-                            }
-                        logging.warning(f"Attempt with {attempt_timeout}s timeout failed, will retry")
-                
-                # Wait for initial table to load with a more specific selector
-                logging.debug("Waiting for table to load...")
-                try:
-                    # First wait for any table to appear
-                    WebDriverWait(driver, 10).until(
-                        EC.presence_of_element_located((By.TAG_NAME, "table"))
-                    )
-                    logging.debug("Table element found")
-
-                    # Then wait for rows to be present
-                    WebDriverWait(driver, timeout).until(
-                        lambda d: len(d.find_elements(By.TAG_NAME, "tr")) > 0
-                    )
-                    logging.debug("Table rows found")
-
-                    # Finally wait for actual content
-                    WebDriverWait(driver, timeout).until(
-                        lambda d: any(
-                            cell.text.strip() 
-                            for row in d.find_elements(By.TAG_NAME, "tr") 
-                            for cell in row.find_elements(By.TAG_NAME, "td")
-                        )
-                    )
-                    logging.debug("Table content loaded successfully")
-                except TimeoutException as e:
-                    logging.warning(f"Timeout waiting for table content: {str(e)}")
-                    raise
-                
-                # Ensure the entire page is loaded by scrolling down gradually
-                logging.debug("Scrolling to ensure all content is loaded...")
-                
-                # Get initial table size
-                initial_rows = len(driver.find_elements(By.TAG_NAME, "tr"))
-                logging.debug(f"Initial row count: {initial_rows}")
-                
-                # Scroll down gradually to trigger any lazy loading
-                last_height = driver.execute_script("return document.body.scrollHeight")
-                while True:
-                    # Scroll down to bottom
-                    driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-                    
-                    # Wait to load page
-                    time.sleep(2)
-                    
-                    # Calculate new scroll height and compare with last scroll height
-                    new_height = driver.execute_script("return document.body.scrollHeight")
-                    if new_height == last_height:
-                        break
-                    last_height = new_height
-                
-                # Check if more rows loaded after scrolling
-                final_rows = len(driver.find_elements(By.TAG_NAME, "tr"))
-                logging.debug(f"Final row count after scrolling: {final_rows}")
-                
-                # Extra delay to ensure everything is rendered
-                time.sleep(3)
-                
-                # Get the page source and parse it
-                html_content = driver.page_source
-                logging.debug("Got page source, parsing certificate data...")
-                cert_data = parse_certificate_data(html_content)
-                
-                if cert_data is None:
-                    # None means parsing failed due to invalid/incomplete HTML
-                    if attempt == max_retries - 1:
-                        return False, {
-                            'type': 'SSL Certificate',
-                            'error': 'Unable to parse certificate data',
-                            'status': 'Error',
-                            'message': 'The certificate service returned an invalid response. Please try again later.'
-                        }
-                    time.sleep(2)
-                    continue
-
-                if cert_data == False:  # Special case: page loaded but no certificates found
-                    return False, {
-                        'type': 'SSL Certificate',
-                        'error': 'No certificates found',
-                        'status': 'Not Found',
-                        'message': 'No certificates for the domain could be found.'
-                    }
-
-                logging.info(f"Successfully retrieved certificate data for {domain}")
-                return True, cert_data
-                
-            except TimeoutException as e:
-                error_msg = f"Timeout error on attempt {attempt + 1}/{max_retries}: {str(e)}"
-                logging.warning(f"crt.sh timeout for {domain}: {error_msg}")
+    for attempt in range(max_retries):
+        try:
+            if attempt > 0:
+                # Add exponential backoff between attempts
+                backoff = 2 ** attempt
+                logger.debug(f"{prefix} Retry attempt {attempt + 1}/{max_retries}, waiting {backoff} seconds")
+                await asyncio.sleep(backoff)
+            
+            cert_data = await get_certificate_json(domain)
+            
+            # Check if we got an error response
+            if cert_data.get('error'):
                 if attempt == max_retries - 1:
-                    return False, {
-                        'type': 'SSL Certificate',
-                        'error': error_msg,
-                        'status': 'Timeout',
-                        'message': 'Unable to connect to crt.sh to retrieve certificate history. The site may be offline.'
-                    }
-                time.sleep(2)
-                
-            except WebDriverException as e:
-                error_msg = f"Browser error: {str(e)}"
-                logging.error(f"crt.sh browser error for {domain}: {error_msg}")
-                
-                # Check for specific error types
-                if "chromedriver" in str(e).lower():
-                    return False, {
-                        'type': 'SSL Certificate',
-                        'error': error_msg,
-                        'status': 'Configuration Error',
-                        'message': 'ChromeDriver error: Please ensure Chrome and ChromeDriver are properly installed'
-                    }
-                elif any(error in str(e).lower() for error in ['502', '503', '504', '500', 'gateway']):
-                    return False, {
-                        'type': 'SSL Certificate',
-                        'error': error_msg,
-                        'status': 'Service Unavailable',
-                        'message': 'Unable to connect to crt.sh to retrieve certificate history. The site may be offline.'
-                    }
-                
-                if attempt == max_retries - 1:
-                    return False, {
-                        'type': 'SSL Certificate',
-                        'error': error_msg,
-                        'status': 'Error',
-                        'message': 'An error occurred while trying to retrieve certificate data. Please try again later.'
-                    }
-                time.sleep(2)
-                
-            finally:
-                # Return driver to pool
-                if driver:
-                    try:
-                        driver_pool.return_driver(driver)
-                        logging.debug("Returned WebDriver to pool")
-                    except Exception as e:
-                        logging.warning(f"Error returning WebDriver to pool: {str(e)}")
-                    finally:
-                        driver = None
+                    logger.error(f"{prefix} Failed after {max_retries} attempts: {cert_data['error']}")
+                    return False, cert_data
+                continue
+            
+            logger.info(f"{prefix} Successfully retrieved certificate data for {domain}")
+            return True, cert_data
+            
+        except Exception as e:
+            error_msg = f"Unexpected error: {str(e)}"
+            logger.error(f"{prefix} {error_msg}")
+            
+            if attempt == max_retries - 1:
+                return False, {
+                    'type': 'SSL Certificate',
+                    'error': error_msg,
+                    'status': 'Error',
+                    'message': 'An error occurred while retrieving certificate data. Please try again later.'
+                }
     
-    except Exception as e:
-        error_msg = f"Unexpected error: {str(e)}"
-        logging.error(f"Unexpected error getting certificate data: {error_msg}")
-        return False, {
-            'type': 'SSL Certificate',
-            'error': error_msg,
-            'status': 'Error',
-            'message': 'Unable to connect to crt.sh to retrieve certificate history. The site may be offline.'
-        }
-    
+    # This should never be reached due to the return in the loop
     return False, {
         'type': 'SSL Certificate',
         'error': f"Failed after {max_retries} attempts",
         'status': 'Error',
-        'message': 'Unable to connect to crt.sh to retrieve certificate history. The site may be offline.'
+        'message': 'Unable to retrieve certificate data from crt.sh'
     }
 
 def get_certificate_data(domain):
-    # Your existing certificate fetching code
-    # Should return the parsed certificate data
+    """
+    Synchronous wrapper for get_first_certificate (deprecated).
+    Use get_first_certificate instead for async operations.
+    This is leftover from the original HTMLscraping method
+    """
+    prefix = log_prefix("get_certificate_data")
+    logger.warning(f"{prefix} This function is deprecated. Use get_first_certificate instead.")
     try:
-        html_content = fetch_certificate_data(domain)  # Your existing fetch function
-        return parse_certificate_data(html_content)
+        loop = asyncio.get_event_loop()
+        success, result = loop.run_until_complete(get_first_certificate(domain))
+        return result if success else None
     except Exception as e:
-        logger.error(f"Error getting certificate data: {str(e)}")
+        logger.error(f"{prefix} Error getting certificate data: {str(e)}")
         return None
 
-def main():
+async def main():
     parser = argparse.ArgumentParser(description='Get the first SSL certificate for a domain from crt.sh')
     parser.add_argument('url', help='The URL or domain to check (e.g., example.com or https://example.com)')
     args = parser.parse_args()
 
     # Extract the main domain
     domain = extract_main_domain(args.url)
-    print(f"Extracted domain: {domain}")
+    logging.info(f"Extracted domain: {domain}")
     
     # Get certificate info
-    print(f"Attempting to fetch certificate information from crt.sh...")
-    success, result = get_first_certificate(domain)
+    logging.info(f"Attempting to fetch certificate information from crt.sh...")
+    success, result = await get_first_certificate(domain)
     
     if success:
         print("\nCertificate found:")
-        print(f"ID: {result['id']}")
-        print(f"Logged at: {result['logged_at']}")
-        print(f"Not Before: {result['not_before']}")
-        print(f"Not After: {result['not_after']}")
-        print(f"Common Name: {result['common_name']}")
-        print(f"Matching Identities: {result['matching_identities']}")
-        print(f"Issuer: {result['issuer']}")
+        print(f"Common Name: {result['Common Name']}")
+        print(f"First Seen: {result['First Seen']}")
+        print(f"Valid From: {result['Valid From']}")
+        print(f"Source: {result['Source']}")
     else:
         print("Failed!")
         print(f"Error: {result}")
 
 if __name__ == "__main__":
-    main() 
+    asyncio.run(main()) 
