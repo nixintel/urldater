@@ -80,7 +80,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
         try {
             debugLog('Sending request...');
-            const response = await fetch('/urldater/analyze', {
+            const response = await fetch('/analyze', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'

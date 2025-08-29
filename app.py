@@ -33,14 +33,6 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 app.logger.setLevel(logging.DEBUG)
 
-# Create a Blueprint for all routes
-bp = Blueprint('urldater', __name__, 
-               static_folder='static',
-               template_folder='templates')
-
-# Register the blueprint immediately after creation
-app.register_blueprint(bp)
-
 # Add this near your other imports
 markdowner = Markdown()
 
@@ -59,21 +51,16 @@ def log_all_requests():
             logger.debug(f"Failed to parse JSON: {str(e)}")
     logger.debug("=" * 80)
 
-@bp.before_request
-def log_request_info():
-    app.logger.debug('Headers: %s', request.headers)
-    app.logger.debug('Body: %s', request.get_data())
-
-@bp.route('/urldater/', methods=['GET'])
+@app.route('/', methods=['GET'])
 def index():
     logging.debug("Index route called!")
     try:
-        return render_template('index.html', blueprint='urldater')
+        return render_template('index.html')
     except Exception as e:
         logging.error(f"Error rendering template: {str(e)}")
         return f"Error: {str(e)}", 500
 
-@bp.route('/urldater/analyze', methods=['POST'])
+@app.route('/analyze', methods=['POST'])
 async def analyze():
     logger.debug("Analyze route called with:")
     logger.debug(f"Headers: {dict(request.headers)}")
@@ -262,7 +249,7 @@ async def analyze():
         logging.error(f"Error in analyze route: {str(e)}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
-@bp.route('/urldater/export/<export_type>', methods=['POST'])
+@app.route('/export/<export_type>', methods=['POST'])
 def export(export_type):
     try:
         data = request.json
@@ -331,7 +318,7 @@ def export(export_type):
         logging.error(f"Error in export route: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
-@bp.route('/urldater/export/all', methods=['POST'])
+@app.route('/export/all', methods=['POST'])
 def export_all():
     try:
         data = request.json
@@ -381,7 +368,7 @@ def export_all():
         logging.error(f"Error in export route: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
-@bp.route('/urldater/search', methods=['POST'])
+@app.route('/search', methods=['POST'])
 async def search():
     task_started = datetime.now(timezone.utc)
     logging.info(f"[TASK] Starting {request.method} /search at {task_started}")
@@ -445,7 +432,7 @@ async def search():
         app.logger.error(f"Error processing search request: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
-@bp.route('/urldater/about')
+@app.route('/about')
 def about():
     try:
         # Read the markdown file
@@ -456,12 +443,12 @@ def about():
         # Convert markdown to HTML
         html_content = markdowner.convert(content)
         
-        return render_template('about.html', content=html_content, blueprint='urldater')
+        return render_template('about.html', content=html_content)
     except Exception as e:
         app.logger.error(f"Error rendering about page: {str(e)}")
         return f"Error loading about page: {str(e)}", 500
 
-@bp.route('/urldater/faq')
+@app.route('/faq')
 def faq():
     try:
         # Read the markdown file
@@ -472,7 +459,7 @@ def faq():
         # Convert markdown to HTML
         html_content = markdowner.convert(content)
         
-        return render_template('faq.html', content=html_content, blueprint='urldater')
+        return render_template('faq.html', content=html_content)
     except Exception as e:
         app.logger.error(f"Error rendering FAQ page: {str(e)}")
         return f"Error loading FAQ page: {str(e)}", 500
