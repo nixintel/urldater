@@ -196,7 +196,7 @@ async function exportTable(type) {
     }
 
     try {
-        const response = await fetch(`/export/${type}`, {
+        const response = await fetch(`/urldater/export/${type}`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -281,7 +281,7 @@ async function exportAll() {
     }
 
     try {
-        const response = await fetch('/export/all', {
+        const response = await fetch('/urldater/export/all', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',

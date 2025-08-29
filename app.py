@@ -1,6 +1,6 @@
 print("Starting Flask app...")
 
-from flask import Flask, render_template, request, jsonify, send_file
+from flask import Flask, Blueprint, render_template, request, jsonify, send_file
 import validators
 import logging
 import pandas as pd
@@ -21,39 +21,79 @@ from certs import get_first_certificate, extract_main_domain, get_certificate_da
 from chrome_driver_pool import driver_pool
 
 app = Flask(__name__)
-logging.basicConfig(level=logging.DEBUG)
+
+# Configure detailed logging
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s [%(levelname)s] %(name)s - %(message)s',
+    handlers=[
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
+app.logger.setLevel(logging.DEBUG)
+
+# Create a Blueprint for all routes
+bp = Blueprint('urldater', __name__, 
+               static_folder='static',
+               template_folder='templates')
+
+# Register the blueprint immediately after creation
+app.register_blueprint(bp)
 
 # Add this near your other imports
 markdowner = Markdown()
 
 @app.before_request
+def log_all_requests():
+    logger.debug("=" * 80)
+    logger.debug(f"Request Method: {request.method}")
+    logger.debug(f"Request URL: {request.url}")
+    logger.debug(f"Request Path: {request.path}")
+    logger.debug(f"Request Headers: {dict(request.headers)}")
+    if request.is_json:
+        try:
+            logger.debug(f"Request JSON: {request.get_json()}")
+        except Exception as e:
+            logger.debug(f"Raw Request Data: {request.get_data(as_text=True)}")
+            logger.debug(f"Failed to parse JSON: {str(e)}")
+    logger.debug("=" * 80)
+
+@bp.before_request
 def log_request_info():
     app.logger.debug('Headers: %s', request.headers)
     app.logger.debug('Body: %s', request.get_data())
 
-@app.route('/', methods=['GET'])
+@bp.route('/urldater/', methods=['GET'])
 def index():
     logging.debug("Index route called!")
     try:
-        return render_template('index.html')
+        return render_template('index.html', blueprint='urldater')
     except Exception as e:
         logging.error(f"Error rendering template: {str(e)}")
         return f"Error: {str(e)}", 500
 
-@app.route('/analyze', methods=['POST'])
+@bp.route('/urldater/analyze', methods=['POST'])
 async def analyze():
-    logging.debug("Analyze route called")
+    logger.debug("Analyze route called with:")
+    logger.debug(f"Headers: {dict(request.headers)}")
+    logger.debug(f"Raw Data: {request.get_data(as_text=True)}")
+    logger.debug(f"Content Type: {request.content_type}")
+    logger.debug(f"Mimetype: {request.mimetype}")
+    
     try:
         # Validate content type
         if not request.is_json:
-            logging.error("Invalid content type, expected application/json")
+            logger.error(f"Invalid content type: {request.content_type}, expected application/json")
             return jsonify({'error': 'Invalid content type, expected application/json'}), 415
             
         try:
             # Get JSON data from request
             data = request.get_json()
+            logger.debug(f"Parsed JSON data: {data}")
         except Exception as e:
-            logging.error(f"Failed to parse JSON data: {str(e)}")
+            logger.error(f"Failed to parse JSON data: {str(e)}")
+            logger.error(f"Raw request data: {request.get_data(as_text=True)}")
             return jsonify({'error': 'Invalid JSON format'}), 400
             
         if not data or 'url' not in data:
@@ -222,7 +262,7 @@ async def analyze():
         logging.error(f"Error in analyze route: {str(e)}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
-@app.route('/export/<export_type>', methods=['POST'])
+@bp.route('/urldater/export/<export_type>', methods=['POST'])
 def export(export_type):
     try:
         data = request.json
@@ -291,7 +331,7 @@ def export(export_type):
         logging.error(f"Error in export route: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
-@app.route('/export/all', methods=['POST'])
+@bp.route('/urldater/export/all', methods=['POST'])
 def export_all():
     try:
         data = request.json
@@ -341,7 +381,7 @@ def export_all():
         logging.error(f"Error in export route: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
-@app.route('/search', methods=['POST'])
+@bp.route('/urldater/search', methods=['POST'])
 async def search():
     task_started = datetime.now(timezone.utc)
     logging.info(f"[TASK] Starting {request.method} /search at {task_started}")
@@ -405,7 +445,7 @@ async def search():
         app.logger.error(f"Error processing search request: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
-@app.route('/about')
+@bp.route('/urldater/about')
 def about():
     try:
         # Read the markdown file
@@ -416,12 +456,12 @@ def about():
         # Convert markdown to HTML
         html_content = markdowner.convert(content)
         
-        return render_template('about.html', content=html_content)
+        return render_template('about.html', content=html_content, blueprint='urldater')
     except Exception as e:
         app.logger.error(f"Error rendering about page: {str(e)}")
         return f"Error loading about page: {str(e)}", 500
 
-@app.route('/faq')
+@bp.route('/urldater/faq')
 def faq():
     try:
         # Read the markdown file
@@ -432,7 +472,7 @@ def faq():
         # Convert markdown to HTML
         html_content = markdowner.convert(content)
         
-        return render_template('faq.html', content=html_content)
+        return render_template('faq.html', content=html_content, blueprint='urldater')
     except Exception as e:
         app.logger.error(f"Error rendering FAQ page: {str(e)}")
         return f"Error loading FAQ page: {str(e)}", 500
