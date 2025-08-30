@@ -15,10 +15,13 @@
     .markdown-content h2 {
         margin-top: 2rem;
         margin-bottom: 1rem;
+        padding-top: 2rem;  /* Add padding for anchor links */
     }
     .markdown-content h3 {
         margin-top: 1.5rem;
         color: #2c3e50;
+        padding-top: 2rem;  /* Add padding for anchor links */
+        scroll-margin-top: 70px;  /* Account for fixed header */
     }
     .markdown-content ul {
         margin-bottom: 1rem;
@@ -36,6 +39,32 @@
     }
     .markdown-content .answer {
         margin-bottom: 1.5rem;
+    }
+    /* Style the table of contents */
+    .markdown-content #contents + ul {
+        background: #f8f9fa;
+        padding: 1.5rem 2rem;
+        border-radius: 8px;
+        border: 1px solid #dee2e6;
+    }
+    .markdown-content #contents + ul a {
+        color: #2c3e50;
+        text-decoration: none;
+    }
+    .markdown-content #contents + ul a:hover {
+        color: #0056b3;
+        text-decoration: underline;
+    }
+    /* Hide the anchor links by default */
+    .markdown-content h3 a[id] {
+        text-decoration: none;
+        color: inherit;
+    }
+    /* Show a link symbol when hovering over headers */
+    .markdown-content h3:hover::after {
+        content: " 🔗";
+        font-size: 0.8em;
+        color: #6c757d;
     }
 </style>
 {% endblock %}
