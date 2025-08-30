@@ -42,7 +42,7 @@ WORKDIR /app
 # Copy the requirements file into the container
 COPY requirements.txt .
 
-# Install Python dependencies
+# Install Python dependencies. Suppress unnecessary warning about pip in Docker container that causes DO failure.
 ENV PIP_ROOT_USER_ACTION=ignore
 RUN pip install --no-cache-dir -r requirements.txt
 
@@ -54,7 +54,8 @@ EXPOSE 5000
 
 # Command to run the application using gunicorn with optimized settings for Selenium
 CMD ["gunicorn", "--bind", "0.0.0.0:5000", \
-     "--workers", "2", \
+     "--workers", "3", \
+     "--threads", "2", \
      "--timeout", "120", \
      "--graceful-timeout", "60", \
      "--max-requests", "1000", \
