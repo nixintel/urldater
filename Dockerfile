@@ -54,7 +54,7 @@ EXPOSE 5000
 
 # Command to run the application using gunicorn with optimized settings for Selenium
 CMD ["gunicorn", "--bind", "0.0.0.0:5000", \
-     "--workers", "2", \
+     "--workers", "3", \
      "--timeout", "120", \
      "--graceful-timeout", "60", \
      "--max-requests", "1000", \
