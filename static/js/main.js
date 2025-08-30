@@ -1,5 +1,6 @@
 // Main application logic
 import { createTimeline } from './timeline.js';
+import { saveResults, loadResults } from './cache.js';
 
 document.addEventListener('DOMContentLoaded', function() {
     // Set copyright year
@@ -18,6 +19,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const spinner = document.getElementById('spinner');
     const results = document.getElementById('results');
     const errorDiv = document.getElementById('error');
+    const urlInput = document.getElementById('url');
 
     // Initialize DataTables
     let domainTable = null;
@@ -37,14 +39,19 @@ document.addEventListener('DOMContentLoaded', function() {
     window.headersPagination = { currentPage: 1, perPage: 10 };
     window.currentTimeline = null;
 
-    // Timeline will be managed in timeline.js
-    
+    // Check for cached results
+    const cached = loadResults();
+    if (cached) {
+        urlInput.value = cached.url;
+        document.querySelector(`input[name="searchType"][value="${cached.searchType}"]`).checked = true;
+        displayResults(cached.data, cached.searchType);
+    }
+
     // Form submission handler
     searchForm.addEventListener('submit', async function(event) {
         event.preventDefault();
         debugLog('Form submitted');
         
-        const urlInput = document.getElementById('url');
         const url = urlInput.value;
         const searchType = document.querySelector('input[name="searchType"]:checked').value;
         
@@ -75,8 +82,6 @@ document.addEventListener('DOMContentLoaded', function() {
         document.getElementById('headers-info').style.display = 'none';
         document.getElementById('ssl-certificate').style.display = 'none';
         document.getElementById('timeline').style.display = 'none';
-        
-        // Timeline will be cleared in createTimeline
 
         try {
             debugLog('Sending request...');
@@ -101,56 +106,11 @@ document.addEventListener('DOMContentLoaded', function() {
             const data = await response.json();
             debugLog('Data received:', data);
             
-            // Create timeline and update checkboxes
-            createTimeline(data);
+            // Save results to cache
+            saveResults(url, searchType, data);
             
-            // Show results based on search type
-            if (searchType === 'all') {
-                // Always show all sections in 'all' mode
-                document.getElementById('domain-info').style.display = 'block';
-                document.getElementById('headers-info').style.display = 'block';
-                document.getElementById('ssl-certificate').style.display = 'block';
-
-                // Handle RDAP results
-                if (data.rdap) {
-                    displayDomainResults(data.rdap);
-                }
-
-                // Handle Headers results
-                if (data.headers) {
-                    displayHeadersResults(data.headers);
-                }
-
-                // Handle Certificate results
-                if (data.certs && Array.isArray(data.certs) && data.certs.length > 0) {
-                    displayCertificateResults(data.certs);
-                } else if (data.certs && data.certs.error) {
-                    // Handle error object from crt.sh
-                    displayCertificateResults([data.certs]);
-                } else {
-                    // Handle case where certs data is missing or empty
-                    displayCertificateResults(null);
-                }
-            } else if (searchType === 'rdap' && data) {
-                document.getElementById('domain-info').style.display = 'block';
-                displayDomainResults(data);
-            } else if (searchType === 'headers' && data) {
-                document.getElementById('headers-info').style.display = 'block';
-                displayHeadersResults(data);
-            } else if (searchType === 'certs') {
-                document.getElementById('ssl-certificate').style.display = 'block';
-                // Handle both array and error object formats
-                if (Array.isArray(data)) {
-                    displayCertificateResults(data);
-                } else if (data && (data.error || data.status === 'Service Unavailable')) {
-                    // Handle error object format
-                    displayCertificateResults([data]);
-                } else {
-                    displayCertificateResults(null);
-                }
-            }
-            
-            results.style.display = 'block';
+            // Display the results
+            displayResults(data, searchType);
             
         } catch (error) {
             debugError('Error:', error);
@@ -160,4 +120,57 @@ document.addEventListener('DOMContentLoaded', function() {
             spinner.style.display = 'none';
         }
     });
-}); 
+
+    function displayResults(data, searchType) {
+        // Create timeline and update checkboxes
+        createTimeline(data);
+        
+        // Show results based on search type
+        if (searchType === 'all') {
+            // Always show all sections in 'all' mode
+            document.getElementById('domain-info').style.display = 'block';
+            document.getElementById('headers-info').style.display = 'block';
+            document.getElementById('ssl-certificate').style.display = 'block';
+
+            // Handle RDAP results
+            if (data.rdap) {
+                displayDomainResults(data.rdap);
+            }
+
+            // Handle Headers results
+            if (data.headers) {
+                displayHeadersResults(data.headers);
+            }
+
+            // Handle Certificate results
+            if (data.certs && Array.isArray(data.certs) && data.certs.length > 0) {
+                displayCertificateResults(data.certs);
+            } else if (data.certs && data.certs.error) {
+                // Handle error object from crt.sh
+                displayCertificateResults([data.certs]);
+            } else {
+                // Handle case where certs data is missing or empty
+                displayCertificateResults(null);
+            }
+        } else if (searchType === 'rdap' && data) {
+            document.getElementById('domain-info').style.display = 'block';
+            displayDomainResults(data);
+        } else if (searchType === 'headers' && data) {
+            document.getElementById('headers-info').style.display = 'block';
+            displayHeadersResults(data);
+        } else if (searchType === 'certs') {
+            document.getElementById('ssl-certificate').style.display = 'block';
+            // Handle both array and error object formats
+            if (Array.isArray(data)) {
+                displayCertificateResults(data);
+            } else if (data && (data.error || data.status === 'Service Unavailable')) {
+                // Handle error object format
+                displayCertificateResults([data]);
+            } else {
+                displayCertificateResults(null);
+            }
+        }
+        
+        results.style.display = 'block';
+    }
+});

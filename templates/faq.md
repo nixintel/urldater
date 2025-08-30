@@ -3,9 +3,9 @@
 
 ### How does the analysis work?
 The tool uses a combination of techniques:
-- RDAP queries for domain registration information, powered by [OpenRDAP](https://openrdap.org). 
-- Certificate Transparency logs (via [crt.sh](https://crt.sh)) for SSL certificate history 
-- HTTP header analysis for media file timestamps 
+- RDAP queries for domain registration information, powered by [OpenRDAP](https://openrdap.org).  
+- Certificate Transparency logs (via [crt.sh](https://crt.sh)) for SSL certificate history  
+- HTTP header analysis for media file timestamps  
 
 You can choose to run all analyses or focus on specific types using the radio buttons.
 
@@ -17,7 +17,7 @@ The tool uses both active and passive techniques:
 - **Active:** Last-Modified header information requires an active connection to the target website. The tool does this by creating a headless browser session, connecting to the URL, and parsing the value of any Last-Modified headers in the response. 
 
 ### What are the limitations?
-- RDAP data may not be available for all TLDs. Although RDAP has superseded WHOIS, not all TLDs have RDAP servers or provide full registration date information. 
+- RDAP data may not be available for all TLDs. Although RDAP has superseded WHOIS, not all TLDs have RDAP servers or provide full registration date information. See [here](https://deployment.rdap.org/) for an up to date list.
 - Some websites may block automated requests with captchas etc. This tool is respectful of captchas and paywalls and does not attempt to bypass them.
 - Not all webservers choose to use Last-Modified headers. In this case the technique will not work and you will not see any results.
 - Certificate history depends on public CT logs. These have generally been available since 2013, but sites older than this may have been issued with certificates prior to this that do not appear in public CT logs.
@@ -29,9 +29,9 @@ The vast majority of TLDs support RDAP, but there are a few outliers that do not
 ### How can I interpret the results?
 The timeline view helps visualize the chronological relationship between:  
 
-- When the domain was registered  
+- When the domain was registered and last updated
 
-- When SSL certificates were first issued   
+- When SSL certificates were first seen in CT logs   
 
 - When image files were last modified on the target webserver  
 
@@ -41,7 +41,7 @@ This can help establish how long a website has been active and identify recent c
 
 ### How can I save my results?
 
-All results from your queries can be exported as CSV files.
+All results from your queries can be exported as CSV files. You can also export the webpage as a PNG or PDF.
 
 ### Why don't I see any data for the Last-Modified headers from the URL that I queried?
 Not all websites use Last-Modified headers, so this technique will not work for them.
@@ -59,6 +59,8 @@ Most TLDs support RDAP and will provide registration date and time results. Howe
 Some RDAP servers may also choose to rate limit or block requests.
 
 If a domain has expired and no longer has a current RDAP record then it is likely no data will be returned. The tool does not query historic registration databases, only live ones.
+
+If no RDAP data is returned try a WHOIS lookup here [Big Domain Data](https://bigdomaindata.com). 
 
 ### Why not use WHOIS?
 WHOIS was deprecated in favour of RDAP in January 2025. WHOIS records are provided in an unstructured, non-standardised text format and are extremely frustrating to work with programatically. If you are really struggling for RDAP results, try [Big Domain Data](https://bigdomaindata.com) for WHOIS records.
@@ -78,8 +80,19 @@ By contrast Last-Modified headers are derived from the origin server's own time 
 
 It is much more difficult to falsify a Last-Modified header than it is to amend an article publication date in WordPress for example.
 
+### Why do the Last Modified results show a 403 or 404 error when I can access the site in my browser?
+
+Some anti-scraping/anti-bot software blocks the request from the tool and returns a 403 error. Currently URLDater does not attempt to bypass captchas etc if it encounters them.
+
 ### The results show that the first SSL certificate was obtained before the domain was even registered - how is this even possible?
-Some RDAP results do not take breaks in ownership into account when determining a domain's first registration date. 
+
+There are two main reasons that this happens.
+
+The most common reason is that SSL certificates do not have an "Issued at" value. They only have a "Valid from" timestamp. SSL certificate issuers may back date a "valid from" timestamp to allow for variations in system clocks. For example Let's Encrypt will backdate an SSL certificate to a time period [one hour before it was issued](https://community.letsencrypt.org/t/ability-to-generate-a-certificate-with-a-valid-from-date-in-the-past/37847).
+
+This may cause some SSL certificates to appear to have been created even before the domain was even registered, especially if the domain registration and first SSL certificate events occurred in close proximity.
+
+A second, less common reason is that some RDAP results do not take breaks in ownership into account when determining a domain's first registration date. 
 
 For example: a domain is first registered on 1st Jan 2018 and obtains an SSL certificate on the same date. On 31st December 2018 the owner decides not to renew the domain registration and the domain is put up for deletion and the SSL certificate eventually expires.  
 
@@ -96,7 +109,7 @@ Yes. The code to self-host this utility is open source and can be cloned from th
 
 ### What if there is a bug?
 
-Report any issues via the [GitHub repository](https://github.com/nixintel/urldater). You must submit
+Report any issues via the [GitHub repository](https://github.com/nixintel/urldater). Before submitting a bug report please ensure you have read the FAQ.
 
 ### What other useful things can I use SSL certificates for?
 
