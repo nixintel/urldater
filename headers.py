@@ -37,11 +37,28 @@ async def get_media_dates_fallback(url):
             async with session.get(url) as response:
                 logging.info(f"Attempting to connect to {url}")
                 logging.info(f"Connection status: {response.status}")
-                if response.status >= 400:
+                # Handle 4xx and 5xx errors differently
+                if 400 <= response.status < 500:
+                    # Client errors (4xx) - no retry needed
+                    error_msg = {
+                        400: 'Bad Request - The server cannot process the request',
+                        401: 'Unauthorized - Authentication is required',
+                        403: 'Forbidden - Access to this resource is forbidden',
+                        404: 'Not Found - The requested resource does not exist',
+                    }.get(response.status, f'Client Error {response.status}')
                     return [{
                         'type': 'Error',
-                        'error': f'HTTP error {response.status}',
-                        'message': 'Failed to fetch the page'
+                        'error': error_msg,
+                        'status_code': response.status,
+                        'no_retry': True
+                    }]
+                elif response.status >= 500:
+                    # Server errors (5xx) - can be retried
+                    return [{
+                        'type': 'Error',
+                        'error': f'Server Error {response.status}',
+                        'status_code': response.status,
+                        'no_retry': False
                     }]
                 
                 # Parse response headers for Link tags
@@ -91,7 +108,7 @@ async def get_media_dates_fallback(url):
                     return [{
                         'type': 'Error',
                         'error': 'Invalid content type',
-                        'message': 'The URL does not point to a web page'
+                        'message': 'The URL does not point to a valid web page'
                     }]
     except Exception as e:
         logging.error(f"Error in fallback method: {str(e)}")
@@ -105,9 +122,20 @@ async def get_last_modified(session, url):
     try:
         async with session.head(url, allow_redirects=True) as response:
             # Check response status
-            if response.status >= 400:
-                logging.error(f"HTTP error {response.status} for {url}")
-                return None
+            if 400 <= response.status < 500:
+                # Client errors (4xx) - no retry needed
+                error_msg = {
+                    400: 'Bad Request',
+                    401: 'Unauthorized',
+                    403: 'Forbidden',
+                    404: 'Not Found',
+                }.get(response.status, f'Client Error {response.status}')
+                logging.error(f"{error_msg} for {url}")
+                return {'error': error_msg, 'status_code': response.status, 'no_retry': True}
+            elif response.status >= 500:
+                # Server errors (5xx) - can be retried
+                logging.error(f"Server error {response.status} for {url}")
+                return {'error': f'Server Error {response.status}', 'status_code': response.status, 'no_retry': False}
                 
             # Validate content type if present
             content_type = response.headers.get('Content-Type', '')
@@ -115,7 +143,7 @@ async def get_last_modified(session, url):
                 logging.warning(f"Unexpected HTML response for {url}")
                 return None
                 
-            # Check various possible header names
+            # Check various possible header names, don't always seem to be standard. 
             last_modified = (
                 response.headers.get('last-modified') or
                 response.headers.get('Last-Modified') or
@@ -194,32 +222,32 @@ async def get_media_dates(url):
     max_retries = 2  # Fewer retries for headers
     session_id = None  # Track session ID for debugging
     
-    # First try the aiohttp approach as it's faster and lighter
+    # If the aiohttp approach fails this will try to use WebDriver instead. In some cases it will fail e.g. Cloudflare captchas.
     try:
         results = await get_media_dates_fallback(url)
         if results and not (len(results) == 1 and results[0].get('type') in ['Error', 'Info']):
-            logging.info("Successfully got results using aiohttp fallback")
+            logging.info(f"{prefix} Successfully got results using aiohttp fallback")
             return results
     except Exception as e:
-        logging.warning(f"Fallback method failed, will try WebDriver: {str(e)}")
+        logging.warning(f"{prefix} Fallback method failed, will try WebDriver: {str(e)}")
     
     try:
         for attempt in range(max_retries):
             if driver is None:
-                logging.info("Getting WebDriver from pool")
+                logging.info(f"{prefix} "Getting WebDriver from pool")
                 try:
                     driver = headers_driver_pool.get_driver()
                     if driver:
                         session_id = driver.session_id
-                        logging.info(f"Got WebDriver with session ID: {session_id}")
+                        logging.info(f"{prefix} Got WebDriver with session ID: {session_id}")
                 except TimeoutError:
-                    logging.error("Could not get WebDriver from pool")
+                    logging.error(f"{prefix} Could not get WebDriver from pool")
                     return results if results else await get_media_dates_fallback(url)
                 except Exception as e:
-                    logging.error(f"Error getting WebDriver: {str(e)}")
+                    logging.error(f"{prefix} Error getting WebDriver: {str(e)}")
                     return results if results else await get_media_dates_fallback(url)
             
-            logging.info(f"Fetching URL: {url}")
+            logging.info(f"{prefix} Fetching URL: {url}")
             try:
                 driver.set_page_load_timeout(15)  # Short timeout for headers
                 driver.get(url)
@@ -273,12 +301,11 @@ async def get_media_dates(url):
                     favicon_url = favicon.get_attribute('href')
                     if favicon_url and not favicon_url.startswith('data:'):
                         media_dict[favicon_url] = 'favicon'
-                        favicon_found = True
-                        logging.info(f"Found favicon: {favicon_url}")
+                        logging.info(f"{prefix} Found favicon: {favicon_url}")
                     else:
-                        logging.debug(f"Skipping data URL or empty favicon: {favicon_url}")
+                        logging.debug(f"{prefix} Skipping data URL or empty favicon: {favicon_url}")
             except Exception as e:
-                logging.warning(f"Error getting favicon with selector {selector}: {str(e)}")
+                logging.warning(f"{prefix} Error getting favicon with selector {selector}: {str(e)}")
         
         if not favicon_found:
             default_favicon = f"{urlparse(url).scheme}://{urlparse(url).netloc}/favicon.ico"
@@ -348,7 +375,20 @@ async def get_media_dates(url):
                 media_url = tasks[task]
                 try:
                     last_modified = task.result()
-                    if last_modified:
+                    if isinstance(last_modified, dict) and 'error' in last_modified:
+                        # Handle error response
+                        if last_modified.get('no_retry', False):
+                            # For 4xx errors, add to results and continue
+                            results.append({
+                                'type': 'Error',
+                                'url': media_url,
+                                'error': last_modified['error']
+                            })
+                            logging.info(f"Added error result for {media_url}: {last_modified['error']}")
+                        else:
+                            # For 5xx errors, allow retry logic to handle it
+                            logging.warning(f"Server error for {media_url}: {last_modified['error']}")
+                    elif last_modified:
                         result = {
                             'type': filtered_media[media_url],
                             'url': media_url,
@@ -426,7 +466,7 @@ async def get_media_dates(url):
     return results
 
 if __name__ == "__main__":
-    # Add code to run this module independently
+    # Add code to run this module independently, careful of the venv!
     import sys
     if len(sys.argv) > 1:
         url = sys.argv[1]
