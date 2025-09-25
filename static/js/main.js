@@ -1,6 +1,6 @@
 // Main application logic
 import { createTimeline } from './timeline.js';
-import { saveResults, loadResults } from './cache.js';
+import { saveResults, loadResults, clearCache } from './cache.js';
 import { displayDomainResults, displayHeadersResults, displayCertificateResults } from './data.js';
 
 // Wait for DOM and modules to load
@@ -67,7 +67,10 @@ window.addEventListener('load', function() {
             $('#headers-table').DataTable().destroy();
         }
         
-        // Clear all previous results and reset displays
+        // Clear cache and all previous results
+        clearCache();  // Always clear cache when submitting new request
+        
+        // Reset displays
         document.getElementById('domain-results').innerHTML = '';
         document.getElementById('headers-results').innerHTML = '';
         document.getElementById('ssl-certificate-results').innerHTML = '';
