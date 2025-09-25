@@ -234,7 +234,8 @@ async def get_media_dates(url):
     try:
         for attempt in range(max_retries):
             if driver is None:
-                logging.info(f"{prefix} "Getting WebDriver from pool")
+                logging.info(f"{prefix} Getting WebDriver from pool")
+                
                 try:
                     driver = headers_driver_pool.get_driver()
                     if driver:
@@ -361,7 +362,7 @@ async def get_media_dates(url):
                 logging.info("No valid URLs to check after filtering")
                 return [{
                     'type': 'Info',
-                    'error': 'No valid images or icons found on the page to check for last-modified dates.'
+                    'error': 'No images or icons found on the page.'
                 }]
             
             # Wait for all tasks with timeout
@@ -404,7 +405,7 @@ async def get_media_dates(url):
                 return [{
                     'type': 'Info',
                     'status': 'No Results',
-                    'error': 'A connection was made but no items with valid Last-Modified headers were found.'
+                    'error': 'Image URLs were found but no Last Modified headers were identified.'
                 }]
     
     except WebDriverException as e:

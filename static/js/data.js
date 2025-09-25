@@ -1,5 +1,5 @@
 // Data handling functions
-function displayDomainResults(data) {
+export function displayDomainResults(data) {
     const tbody = document.getElementById('domain-results');
     tbody.innerHTML = '';
     
@@ -77,7 +77,7 @@ function displayDomainResults(data) {
     });
 }
 
-function displayHeadersResults(data) {
+export function displayHeadersResults(data) {
     const tbody = document.getElementById('headers-results');
     const filterValue = document.getElementById('type-filter').value;
     tbody.innerHTML = '';
@@ -97,7 +97,14 @@ function displayHeadersResults(data) {
     }
 
     // Check if the response contains an error or info message
-    if (data[0].error) {
+    if (data[0].error || data[0].type === 'Info' || data[0].type === 'Error') {
+        // Don't show the table headers for info/error messages
+        const table = document.getElementById('headers-table');
+        if (table) {
+            const thead = table.querySelector('thead');
+            if (thead) thead.style.display = 'none';
+        }
+
         const row = document.createElement('tr');
         const alertClass = data[0].type === 'Info' ? 'alert-info' : 'alert-warning';
         const icon = data[0].type === 'Info' ? 'bi-info-circle' : 'bi-exclamation-triangle-fill';
@@ -105,7 +112,7 @@ function displayHeadersResults(data) {
             <td colspan="3">
                 <div class="alert ${alertClass} mb-0">
                     <i class="bi ${icon} me-2"></i>
-                    <strong>Headers Service Notice:</strong> ${data[0].error}
+                    <strong>Headers Service Notice:</strong> ${data[0].error || data[0].message}
                 </div>
             </td>
         `;
@@ -130,18 +137,43 @@ function displayHeadersResults(data) {
 
     // Display the data
     filteredResults.forEach(item => {
-        // Parse the date string into a timestamp for sorting
-        const [date, time] = item.last_modified.split(' ');
-        const [day, month, year] = date.split('-');
-        const timestamp = new Date(`${year}-${month}-${day} ${time}`).getTime();
-        
-        const row = document.createElement('tr');
-        row.innerHTML = `
-            <td>${item.type}</td>
-            <td><a href="${item.url}" target="_blank">${item.url}</a></td>
-            <td data-order="${timestamp}">${item.last_modified}</td>
-        `;
-        tbody.appendChild(row);
+        try {
+            let timestamp = 0;
+            let formattedDate = 'N/A';
+            
+            // Check if last_modified exists and is properly formatted
+            if (item.last_modified && typeof item.last_modified === 'string') {
+                // Parse the date string into a timestamp for sorting
+                const [date, time] = item.last_modified.split(' ');
+                if (date && time) {
+                    const [day, month, year] = date.split('-');
+                    if (day && month && year) {
+                        timestamp = new Date(`${year}-${month}-${day} ${time}`).getTime();
+                        formattedDate = item.last_modified;
+                    }
+                }
+            }
+            
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td>${item.type || 'Unknown'}</td>
+                <td><a href="${item.url || '#'}" target="_blank">${item.url || 'No URL available'}</a></td>
+                <td data-order="${timestamp}">${formattedDate}</td>
+            `;
+            tbody.appendChild(row);
+        } catch (error) {
+            console.error('Error processing header item:', error);
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td colspan="3" class="text-warning">
+                    <div class="alert alert-warning mb-0">
+                        <i class="bi bi-exclamation-triangle-fill me-2"></i>
+                        Error processing this item
+                    </div>
+                </td>
+            `;
+            tbody.appendChild(row);
+        }
     });
 
     // Initialize DataTable with sorting
@@ -163,7 +195,7 @@ function displayHeadersResults(data) {
     });
 }
 
-function displayCertificateResults(data) {
+export function displayCertificateResults(data) {
     const tbody = document.getElementById('ssl-certificate-results');
     tbody.innerHTML = '';  // Clear existing results
     
@@ -237,6 +269,6 @@ function displayCertificateResults(data) {
     document.getElementById('ssl-certificate').style.display = 'block';
 }
 
-function filterHeadersResults() {
+export function filterHeadersResults() {
     displayHeadersResults(window.headerResults);
 } 

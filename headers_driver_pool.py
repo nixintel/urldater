@@ -33,20 +33,57 @@ class HeadersWebDriverPool:
         
     def _create_driver(self):
         """Create a new Chrome WebDriver instance optimized for header retrieval"""
+        import os
+        import tempfile
+        
         chrome_options = Options()
+        
+        # Essential options for Docker environment
         chrome_options.add_argument('--headless=new')
         chrome_options.add_argument('--no-sandbox')
         chrome_options.add_argument('--disable-dev-shm-usage')
+        
+        # Performance and stability options
         chrome_options.add_argument('--disable-gpu')
         chrome_options.add_argument('--disable-extensions')
         chrome_options.add_argument('--disable-logging')
         chrome_options.add_argument('--log-level=3')
-        chrome_options.add_argument('--disable-javascript')  # Disable JS for faster loading
         chrome_options.add_argument('--window-size=1920,1080')
+        
+        # Memory and process management
+        chrome_options.add_argument('--disable-features=site-per-process')
+        chrome_options.add_argument('--disable-web-security')
+        chrome_options.add_argument('--disable-features=IsolateOrigins,site-per-process')
+        
+        # Browser identification
         chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36')
+        
+        # Performance optimizations
         chrome_options.page_load_strategy = 'eager'
-        chrome_options.add_argument('--memory-pressure-off')
-        chrome_options.add_argument('--single-process')
+        chrome_options.add_argument('--disable-background-networking')
+        chrome_options.add_argument('--disable-background-timer-throttling')
+        chrome_options.add_argument('--disable-backgrounding-occluded-windows')
+        chrome_options.add_argument('--disable-breakpad')
+        chrome_options.add_argument('--disable-client-side-phishing-detection')
+        chrome_options.add_argument('--disable-default-apps')
+        chrome_options.add_argument('--disable-hang-monitor')
+        chrome_options.add_argument('--disable-popup-blocking')
+        chrome_options.add_argument('--disable-prompt-on-repost')
+        chrome_options.add_argument('--disable-sync')
+        chrome_options.add_argument('--force-color-profile=srgb')
+        chrome_options.add_argument('--metrics-recording-only')
+        chrome_options.add_argument('--no-first-run')
+        chrome_options.add_argument('--password-store=basic')
+        chrome_options.add_argument('--use-mock-keychain')
+        
+        # Create a unique user data directory for this instance
+        user_data_dir = os.path.join(tempfile.gettempdir(), f'chrome_user_data_{os.getpid()}_{id(self)}')
+        if not os.path.exists(user_data_dir):
+            os.makedirs(user_data_dir)
+        chrome_options.add_argument(f'--user-data-dir={user_data_dir}')
+        
+        # Store the user data directory path for cleanup
+        self.user_data_dir = user_data_dir
         
         service = Service()
         driver = webdriver.Chrome(service=service, options=chrome_options)
@@ -153,6 +190,12 @@ class HeadersWebDriverPool:
         cleanup_success = False
         
         try:
+            # First try to get the user data directory path before closing the driver
+            try:
+                user_data_dir = driver.options.arguments[-1].replace('--user-data-dir=', '')
+            except:
+                user_data_dir = getattr(self, 'user_data_dir', None)
+            
             # Try to close all windows first
             try:
                 if hasattr(driver, 'window_handles'):
@@ -161,14 +204,6 @@ class HeadersWebDriverPool:
                         driver.close()
             except Exception as e:
                 logging.debug(f"Error closing windows: {str(e)}")
-            
-            # Try to clear browser data
-            try:
-                driver.execute_script("window.localStorage.clear();")
-                driver.execute_script("window.sessionStorage.clear();")
-                driver.delete_all_cookies()
-            except Exception as e:
-                logging.debug(f"Error clearing browser data: {str(e)}")
             
             # Try to quit the driver
             try:
@@ -183,11 +218,26 @@ class HeadersWebDriverPool:
                     import psutil
                     process = psutil.Process(driver.service.process.pid)
                     for child in process.children(recursive=True):
-                        child.terminate()
+                        try:
+                            child.terminate()
+                            child.wait(timeout=3)
+                        except:
+                            child.kill()
                     process.terminate()
+                    process.wait(timeout=3)
                     cleanup_success = True
                 except Exception as e:
                     logging.error(f"Error force quitting driver: {str(e)}")
+            
+            # Clean up user data directory
+            if user_data_dir:
+                try:
+                    import shutil
+                    if os.path.exists(user_data_dir):
+                        shutil.rmtree(user_data_dir, ignore_errors=True)
+                        logging.info(f"Cleaned up user data directory: {user_data_dir}")
+                except Exception as e:
+                    logging.error(f"Error cleaning up user data directory: {str(e)}")
                     
         except Exception as e:
             logging.error(f"Error in driver cleanup: {str(e)}")
