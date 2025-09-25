@@ -228,7 +228,7 @@
 {% block content %}
 <div class="container">
     
-    <form id="searchForm">
+    <form id="searchForm" method="post" action="javascript:void(0);">
         <div class="form-group">
             <div class="input-group">
                 <input type="text" class="form-control" id="url" name="url" placeholder="Enter URL here..." required>
@@ -403,6 +403,6 @@
 <!-- Load our external JS files -->
 <script type="module" src="{{ url_for('static', filename='js/main.js') }}"></script>
 <script type="module" src="{{ url_for('static', filename='js/timeline.js') }}"></script>
-<script src="{{ url_for('static', filename='js/data.js') }}"></script>
+<script type="module" src="{{ url_for('static', filename='js/data.js') }}"></script>
 <script src="{{ url_for('static', filename='js/export.js') }}"></script>
 {% endblock %} 

@@ -9,8 +9,7 @@ services:
       - PYTHONUNBUFFERED=1
       - FLASK_DEBUG=1  # Enable Flask debug mode for auto-reload
     volumes:
-      - ./templates:/app/templates  # Mount templates directory
-      - ./static:/app/static        # Mount static files directory
+      - .:/app  # Mount the entire application directory
       - /dev/shm:/dev/shm  # Proper shared memory allocation
     shm_size: '2gb'  # Increase shared memory size
     restart: unless-stopped

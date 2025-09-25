@@ -1,8 +1,10 @@
 // Main application logic
 import { createTimeline } from './timeline.js';
 import { saveResults, loadResults } from './cache.js';
+import { displayDomainResults, displayHeadersResults, displayCertificateResults } from './data.js';
 
-document.addEventListener('DOMContentLoaded', function() {
+// Wait for DOM and modules to load
+window.addEventListener('load', function() {
     // Set copyright year
     document.getElementById('copyright-year').textContent = new Date().getFullYear();
 
@@ -31,6 +33,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     debugLog('Form found:', searchForm);
+<<<<<<< HEAD
 
     // Initialize global variables
     window.domainResults = [];
@@ -48,8 +51,11 @@ document.addEventListener('DOMContentLoaded', function() {
         document.getElementById('form-info').style.display = 'none';
     }
 
+=======
+    
+>>>>>>> dev
     // Form submission handler
-    searchForm.addEventListener('submit', async function(event) {
+    const handleSubmit = async function(event) {
         event.preventDefault();
         debugLog('Form submitted');
         
@@ -122,12 +128,44 @@ document.addEventListener('DOMContentLoaded', function() {
             
         } catch (error) {
             debugError('Error:', error);
-            errorDiv.textContent = error.message;
+            
+            // Convert technical errors into user-friendly messages
+            let userMessage = 'An error occurred while analyzing the URL. ';
+            
+            if (error.message.includes('split')) {
+                userMessage += 'There was an issue processing the date information from the server.';
+            } else if (error.message.includes('undefined')) {
+                userMessage += 'Some required data was missing from the server response.';
+            } else if (error.message.includes('HTTP error')) {
+                userMessage += 'The server encountered an error. Please try again later.';
+            } else {
+                userMessage += error.message;
+            }
+            
+            errorDiv.textContent = userMessage;
             errorDiv.classList.remove('d-none');
         } finally {
             spinner.style.display = 'none';
         }
-    });
+    };
+
+    // Initialize global variables
+    window.domainResults = [];
+    window.certResults = [];
+    window.headerResults = [];
+    window.headersPagination = { currentPage: 1, perPage: 10 };
+    window.currentTimeline = null;
+
+    // Check for cached results
+    const cached = loadResults();
+    if (cached) {
+        urlInput.value = cached.url;
+        document.querySelector(`input[name="searchType"][value="${cached.searchType}"]`).checked = true;
+        displayResults(cached.data, cached.searchType);
+    }
+
+    // Attach submit handler
+    searchForm.addEventListener('submit', handleSubmit);
 
     function displayResults(data, searchType) {
         // Create timeline and update checkboxes

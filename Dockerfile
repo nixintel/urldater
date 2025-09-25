@@ -39,15 +39,10 @@ RUN CHROME_VERSION=$(google-chrome-stable --version | awk '{print $3}') \
 # Create and set the working directory
 WORKDIR /app
 
-# Copy the requirements file into the container
-COPY requirements.txt .
-
-# Install Python dependencies. Suppress unnecessary warning about pip in Docker container that causes DO failure.
-ENV PIP_ROOT_USER_ACTION=ignore
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Copy the rest of the application
-COPY . .
+# Create a directory for requirements
+COPY requirements.txt /tmp/
+RUN pip install --no-cache-dir -r /tmp/requirements.txt \
+    && rm /tmp/requirements.txt
 
 # Expose the port the app runs on
 EXPOSE 5000
