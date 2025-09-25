@@ -33,27 +33,6 @@ window.addEventListener('load', function() {
     }
 
     debugLog('Form found:', searchForm);
-<<<<<<< HEAD
-
-    // Initialize global variables
-    window.domainResults = [];
-    window.certResults = [];
-    window.headerResults = [];
-    window.headersPagination = { currentPage: 1, perPage: 10 };
-    window.currentTimeline = null;
-
-    // Check for cached results
-    const cached = loadResults();
-    if (cached) {
-        urlInput.value = cached.url;
-        document.querySelector(`input[name="searchType"][value="${cached.searchType}"]`).checked = true;
-        displayResults(cached.data, cached.searchType);
-        document.getElementById('form-info').style.display = 'none';
-    }
-
-=======
-    
->>>>>>> dev
     // Form submission handler
     const handleSubmit = async function(event) {
         event.preventDefault();

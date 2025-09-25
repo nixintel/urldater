@@ -235,10 +235,6 @@ async def get_media_dates(url):
         for attempt in range(max_retries):
             if driver is None:
                 logging.info(f"{prefix} Getting WebDriver from pool")
-<<<<<<< HEAD
-=======
-                
->>>>>>> dev
                 try:
                     driver = headers_driver_pool.get_driver()
                     if driver:
