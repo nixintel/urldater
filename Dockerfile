@@ -3,7 +3,8 @@ FROM python:3.11-slim
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1 \
-    DEBIAN_FRONTEND=noninteractive
+    DEBIAN_FRONTEND=noninteractive \
+    PIP_ROOT_USER_ACTION=ignore
 
 # Install system dependencies and Google Chrome
 RUN apt-get update && apt-get install -y \
