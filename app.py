@@ -36,6 +36,11 @@ app.logger.setLevel(logging.DEBUG)
 # Add this near your other imports
 markdowner = Markdown()
 
+# Add markdown filter
+@app.template_filter('markdown')
+def markdown_filter(text):
+    return markdowner.convert(text)
+
 @app.before_request
 def log_all_requests():
     logger.debug("=" * 80)

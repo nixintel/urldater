@@ -145,7 +145,7 @@ class HeadersWebDriverPool:
                 self._cleanup_driver(driver)
 
     def _cleanup_driver(self, driver):
-        """Clean up a WebDriver instance with enhanced error recovery"""
+        """Clean up a WebDriver instance with enhanced error recovery and session validation"""
         if not driver:
             return
             
@@ -153,22 +153,31 @@ class HeadersWebDriverPool:
         cleanup_success = False
         
         try:
-            # Try to close all windows first
+            # First check if session is still valid
             try:
-                if hasattr(driver, 'window_handles'):
-                    for handle in driver.window_handles:
-                        driver.switch_to.window(handle)
-                        driver.close()
-            except Exception as e:
-                logging.debug(f"Error closing windows: {str(e)}")
+                driver.current_url
+                session_valid = True
+            except:
+                session_valid = False
+                logging.debug("Session already invalid, proceeding with force cleanup")
             
-            # Try to clear browser data
-            try:
-                driver.execute_script("window.localStorage.clear();")
-                driver.execute_script("window.sessionStorage.clear();")
-                driver.delete_all_cookies()
-            except Exception as e:
-                logging.debug(f"Error clearing browser data: {str(e)}")
+            if session_valid:
+                # Try to close all windows first
+                try:
+                    if hasattr(driver, 'window_handles'):
+                        for handle in driver.window_handles:
+                            driver.switch_to.window(handle)
+                            driver.close()
+                except Exception as e:
+                    logging.debug(f"Error closing windows: {str(e)}")
+                
+                # Try to clear browser data only if session is valid
+                try:
+                    driver.execute_script("window.localStorage.clear();")
+                    driver.execute_script("window.sessionStorage.clear();")
+                    driver.delete_all_cookies()
+                except Exception as e:
+                    logging.debug(f"Error clearing browser data: {str(e)}")
             
             # Try to quit the driver
             try:
@@ -177,14 +186,20 @@ class HeadersWebDriverPool:
             except Exception as e:
                 logging.warning(f"Error quitting driver: {str(e)}")
                 
-            # If normal quit failed, try force quit
+            # If normal quit failed or session was invalid, try force quit
             if not cleanup_success:
                 try:
                     import psutil
                     process = psutil.Process(driver.service.process.pid)
-                    for child in process.children(recursive=True):
-                        child.terminate()
+                    children = process.children(recursive=True)
+                    for child in children:
+                        try:
+                            child.terminate()
+                            child.wait(timeout=3)  # Wait for process to terminate
+                        except psutil.TimeoutExpired:
+                            child.kill()  # Force kill if terminate doesn't work
                     process.terminate()
+                    process.wait(timeout=3)  # Wait for main process to terminate
                     cleanup_success = True
                 except Exception as e:
                     logging.error(f"Error force quitting driver: {str(e)}")

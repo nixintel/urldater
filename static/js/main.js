@@ -45,6 +45,7 @@ document.addEventListener('DOMContentLoaded', function() {
         urlInput.value = cached.url;
         document.querySelector(`input[name="searchType"][value="${cached.searchType}"]`).checked = true;
         displayResults(cached.data, cached.searchType);
+        document.getElementById('form-info').style.display = 'none';
     }
 
     // Form submission handler
@@ -55,16 +56,23 @@ document.addEventListener('DOMContentLoaded', function() {
         const url = urlInput.value;
         const searchType = document.querySelector('input[name="searchType"]:checked').value;
         
+        // Clear cache if the URL or search type is different from cached data
+        const cached = loadResults();
+        if (cached && (cached.url !== url || cached.searchType !== searchType)) {
+            clearCache();
+        }
+        
         // Set the analyzed URL in the results title
         document.getElementById('analyzed-url').textContent = url;
         
         debugLog('URL:', url);
         debugLog('Search Type:', searchType);
         
-        // Show spinner and hide previous results/errors
+        // Show spinner and hide previous results/errors and form info
         spinner.style.display = 'block';
         if (results) results.style.display = 'none';
         if (errorDiv) errorDiv.classList.add('d-none');
+        document.getElementById('form-info').style.display = 'none';
 
         // Clean up existing DataTables instances
         if ($.fn.DataTable.isDataTable('#domain-table')) {
