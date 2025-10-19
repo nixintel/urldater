@@ -93,11 +93,18 @@ async def get_media_dates_fallback(url):
                             media_url = urljoin(url, media_url)
                         
                         last_modified = await get_last_modified(session, media_url)
-                        if last_modified:
+                        if last_modified and isinstance(last_modified, datetime):
                             results.append({
                                 'type': 'image' if any(ext in media_url.lower() for ext in ['.jpg', '.jpeg', '.png', '.gif']) else 'favicon',
                                 'url': media_url,
                                 'last_modified': format_datetime(last_modified)
+                            })
+                        elif isinstance(last_modified, dict) and 'error' in last_modified:
+                            # Handle error responses
+                            results.append({
+                                'type': 'Error',
+                                'url': media_url,
+                                'error': last_modified['error']
                             })
                     
                     return results if results else [{
@@ -389,7 +396,7 @@ async def get_media_dates(url):
                         else:
                             # For 5xx errors, allow retry logic to handle it
                             logging.warning(f"Server error for {media_url}: {last_modified['error']}")
-                    elif last_modified:
+                    elif last_modified and isinstance(last_modified, datetime):
                         result = {
                             'type': filtered_media[media_url],
                             'url': media_url,
