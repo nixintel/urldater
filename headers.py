@@ -306,12 +306,20 @@ async def get_media_dates(url):
             try:
                 favicon_elements = driver.find_elements(By.CSS_SELECTOR, selector)
                 for favicon in favicon_elements:
-                    favicon_url = favicon.get_attribute('href')
-                    if favicon_url and not favicon_url.startswith('data:'):
-                        media_dict[favicon_url] = 'favicon'
-                        logging.info(f"{prefix} Found favicon: {favicon_url}")
-                    else:
-                        logging.debug(f"{prefix} Skipping data URL or empty favicon: {favicon_url}")
+                    try:
+                        favicon_url = favicon.get_attribute('href')
+                        if favicon_url and not favicon_url.startswith('data:'):
+                            media_dict[favicon_url] = 'favicon'
+                            logging.info(f"{prefix} Found favicon: {favicon_url}")
+                            favicon_found = True
+                        else:
+                            logging.debug(f"{prefix} Skipping data URL or empty favicon: {favicon_url}")
+                    except StaleElementReferenceException:
+                        logging.warning(f"{prefix} Stale element reference when getting favicon href, skipping this favicon")
+                        continue
+                    except Exception as e:
+                        logging.warning(f"{prefix} Error getting favicon href: {str(e)}")
+                        continue
             except Exception as e:
                 logging.warning(f"{prefix} Error getting favicon with selector {selector}: {str(e)}")
         
@@ -325,10 +333,17 @@ async def get_media_dates(url):
         try:
             images = driver.find_elements(By.TAG_NAME, 'img')
             for img in images:
-                src = img.get_attribute('src')
-                if src:
-                    media_dict[src] = 'image'
-                    logging.info(f"Found image: {src}")
+                try:
+                    src = img.get_attribute('src')
+                    if src:
+                        media_dict[src] = 'image'
+                        logging.info(f"Found image: {src}")
+                except StaleElementReferenceException:
+                    logging.warning("Stale element reference when getting image src, skipping this image")
+                    continue
+                except Exception as e:
+                    logging.warning(f"Error getting image src: {str(e)}")
+                    continue
         except Exception as e:
             logging.warning(f"Error getting images: {str(e)}")
         

@@ -26,6 +26,12 @@ logging.basicConfig(level=logging.DEBUG)
 # Add this near your other imports
 markdowner = Markdown()
 
+# Global error handler to ensure all errors return JSON
+@app.errorhandler(Exception)
+def handle_exception(e):
+    logging.error(f"Unhandled exception: {str(e)}", exc_info=True)
+    return jsonify({'error': 'An unexpected error occurred. Please try again later.'}), 500
+
 @app.before_request
 def log_request_info():
     app.logger.debug('Headers: %s', request.headers)
