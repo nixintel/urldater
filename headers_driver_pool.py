@@ -43,11 +43,15 @@ class HeadersWebDriverPool:
         chrome_options.add_argument('--no-sandbox')
         chrome_options.add_argument('--disable-dev-shm-usage')
         
+        # Enable Chrome DevTools Protocol for network monitoring
+        chrome_options.add_argument('--enable-logging')
+        chrome_options.add_argument('--log-level=0')
+        chrome_options.add_experimental_option('useAutomationExtension', False)
+        chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+        
         # Performance and stability options
         chrome_options.add_argument('--disable-gpu')
         chrome_options.add_argument('--disable-extensions')
-        chrome_options.add_argument('--disable-logging')
-        chrome_options.add_argument('--log-level=3')
         chrome_options.add_argument('--window-size=1920,1080')
         
         # Memory and process management
@@ -85,9 +89,22 @@ class HeadersWebDriverPool:
         # Store the user data directory path for cleanup
         self.user_data_dir = user_data_dir
         
+        # Enable CDP capabilities
+        from selenium.webdriver.common.desired_capabilities import DesiredCapabilities
+        caps = DesiredCapabilities.CHROME
+        caps['goog:loggingPrefs'] = {'performance': 'ALL'}
+        
         service = Service()
-        driver = webdriver.Chrome(service=service, options=chrome_options)
+        driver = webdriver.Chrome(service=service, options=chrome_options, desired_capabilities=caps)
         driver.set_page_load_timeout(15)  # Shorter timeout for headers
+        
+        # Enable network domain for CDP
+        try:
+            driver.execute_cdp_cmd('Network.enable', {})
+            logging.debug("CDP Network domain enabled")
+        except Exception as e:
+            logging.warning(f"Failed to enable CDP Network domain: {e}")
+        
         return driver
         
     def _get_memory_usage(self):

@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 import logging
 from urllib.parse import urlparse
 import time
+import json
 
 # Configure module logger
 logger = logging.getLogger(__name__)
@@ -218,6 +219,125 @@ def get_elements_with_retry(driver, by, value, max_retries=3, timeout=10):
             time.sleep(1)
     return []
 
+def is_media_url(url):
+    """Check if URL is a media file (image, favicon, etc.)"""
+    if not url:
+        return False
+    
+    # Skip data URLs
+    if url.startswith('data:'):
+        return False
+    
+    # Check for media file extensions
+    media_extensions = ('.gif', '.jpg', '.jpeg', '.png', '.svg', '.ico', '.webp', 
+                       '.tif', '.tiff', '.bmp', '.heif', '.eps')
+    
+    url_lower = url.lower()
+    return any(url_lower.endswith(ext) for ext in media_extensions)
+
+def get_media_type(url):
+    """Determine media type from URL"""
+    if not url:
+        return 'unknown'
+    
+    url_lower = url.lower()
+    if any(ext in url_lower for ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.tif', '.tiff', '.heif']):
+        return 'image'
+    elif any(ext in url_lower for ext in ['.ico', '.svg']):
+        return 'favicon'
+    else:
+        return 'media'
+
+def get_media_dates_with_cdp(driver, url):
+    """Get media dates using Chrome DevTools Protocol (CDP) - much faster approach"""
+    prefix = log_prefix("get_media_dates_with_cdp")
+    logger.info(f"{prefix} Starting CDP-based retrieval for URL: {url}")
+    
+    try:
+        # Clear any existing logs
+        driver.get_log('performance')
+        
+        # Navigate to the page
+        logger.info(f"{prefix} Navigating to: {url}")
+        driver.set_page_load_timeout(15)
+        driver.get(url)
+        
+        # Wait for page to load completely
+        try:
+            WebDriverWait(driver, 10).until(
+                lambda d: d.execute_script('return document.readyState') == 'complete'
+            )
+            logger.info(f"{prefix} Page load complete")
+        except TimeoutException:
+            logger.warning(f"{prefix} Page load timeout - continuing with partial content")
+        
+        # Wait a bit more for any lazy-loaded images
+        time.sleep(2)
+        
+        # Get performance logs
+        logs = driver.get_log('performance')
+        logger.info(f"{prefix} Retrieved {len(logs)} performance log entries")
+        
+        # Parse logs for network responses
+        media_responses = []
+        processed_urls = set()  # Avoid duplicates
+        
+        for log in logs:
+            try:
+                message = json.loads(log['message'])
+                method = message['message'].get('method')
+                
+                if method == 'Network.responseReceived':
+                    params = message['message']['params']
+                    response = params['response']
+                    response_url = response['url']
+                    
+                    # Check if this is a media URL
+                    if is_media_url(response_url) and response_url not in processed_urls:
+                        processed_urls.add(response_url)
+                        
+                        # Get headers
+                        headers = response.get('headers', {})
+                        last_modified = (
+                            headers.get('last-modified') or
+                            headers.get('Last-Modified') or
+                            headers.get('x-last-modified') or
+                            headers.get('X-Last-Modified')
+                        )
+                        
+                        if last_modified:
+                            try:
+                                # Parse the date
+                                dt = datetime.strptime(last_modified, '%a, %d %b %Y %H:%M:%S GMT')
+                                dt = dt.replace(tzinfo=timezone.utc)
+                                
+                                media_type = get_media_type(response_url)
+                                
+                                media_responses.append({
+                                    'type': media_type,
+                                    'url': response_url,
+                                    'last_modified': format_datetime(dt),
+                                    '_last_modified_dt': dt
+                                })
+                                
+                                logger.info(f"{prefix} Found {media_type}: {response_url} - {format_datetime(dt)}")
+                                
+                            except ValueError as e:
+                                logger.warning(f"{prefix} Invalid date format for {response_url}: {last_modified} - {e}")
+                        else:
+                            logger.debug(f"{prefix} No last-modified header for {response_url}")
+                            
+            except (json.JSONDecodeError, KeyError) as e:
+                logger.debug(f"{prefix} Error parsing log entry: {e}")
+                continue
+        
+        logger.info(f"{prefix} CDP method found {len(media_responses)} media items with last-modified headers")
+        return media_responses
+        
+    except Exception as e:
+        logger.error(f"{prefix} Error in CDP method: {str(e)}")
+        return []
+
 async def get_media_dates(url):
     prefix = log_prefix("get_media_dates")
     logger.info(f"{prefix} Starting for URL: {url}")
@@ -229,57 +349,61 @@ async def get_media_dates(url):
     max_retries = 2  # Fewer retries for headers
     session_id = None  # Track session ID for debugging
     
-    # If the aiohttp approach fails this will try to use WebDriver instead. In some cases it will fail e.g. Cloudflare captchas.
+    # Try CDP method first (fastest)
+    try:
+        logging.info(f"{prefix} Attempting CDP method first")
+        driver = headers_driver_pool.get_driver()
+        if driver:
+            session_id = driver.session_id
+            logging.info(f"{prefix} Got WebDriver with session ID: {session_id}")
+            
+            # Try CDP method
+            cdp_results = get_media_dates_with_cdp(driver, url)
+            if cdp_results:
+                logging.info(f"{prefix} CDP method successful, found {len(cdp_results)} results")
+                # Return driver to pool
+                headers_driver_pool.return_driver(driver)
+                return cdp_results
+            else:
+                logging.info(f"{prefix} CDP method found no results, will try fallback methods")
+                # Keep driver for fallback methods
+    except Exception as e:
+        logging.warning(f"{prefix} CDP method failed: {str(e)}")
+        if driver:
+            headers_driver_pool.return_driver(driver)
+            driver = None
+    
+    # If CDP method fails or finds no results, try aiohttp fallback
     try:
         results = await get_media_dates_fallback(url)
         if results and not (len(results) == 1 and results[0].get('type') in ['Error', 'Info']):
             logging.info(f"{prefix} Successfully got results using aiohttp fallback")
+            if driver:
+                headers_driver_pool.return_driver(driver)
             return results
     except Exception as e:
         logging.warning(f"{prefix} Fallback method failed, will try WebDriver: {str(e)}")
     
+    # If we still don't have a driver, try to get one for WebDriver fallback
+    if driver is None:
+        try:
+            logging.info(f"{prefix} Getting WebDriver from pool for fallback")
+            driver = headers_driver_pool.get_driver()
+            if driver:
+                session_id = driver.session_id
+                logging.info(f"{prefix} Got WebDriver with session ID: {session_id}")
+        except TimeoutError:
+            logging.error(f"{prefix} Could not get WebDriver from pool")
+            return results if results else await get_media_dates_fallback(url)
+        except Exception as e:
+            logging.error(f"{prefix} Error getting WebDriver: {str(e)}")
+            return results if results else await get_media_dates_fallback(url)
+    
+    # Use WebDriver fallback method (original DOM-based approach)
     try:
-        for attempt in range(max_retries):
-            if driver is None:
-                logging.info(f"{prefix} Getting WebDriver from pool")
-                
-                try:
-                    driver = headers_driver_pool.get_driver()
-                    if driver:
-                        session_id = driver.session_id
-                        logging.info(f"{prefix} Got WebDriver with session ID: {session_id}")
-                except TimeoutError:
-                    logging.error(f"{prefix} Could not get WebDriver from pool")
-                    return results if results else await get_media_dates_fallback(url)
-                except Exception as e:
-                    logging.error(f"{prefix} Error getting WebDriver: {str(e)}")
-                    return results if results else await get_media_dates_fallback(url)
-            
-            logging.info(f"{prefix} Fetching URL: {url}")
-            try:
-                driver.set_page_load_timeout(15)  # Short timeout for headers
-                driver.get(url)
-            except WebDriverException as e:
-                error_message = str(e).lower()
-                if any(err in error_message for err in [
-                    'err_name_not_resolved',
-                    'err_connection_refused',
-                    'err_connection_timed_out',
-                    'err_ssl_protocol_error'
-                ]):
-                    # For connection errors, try aiohttp approach
-                    if driver:
-                        headers_driver_pool.return_driver(driver)
-                        driver = None
-                    return await get_media_dates_fallback(url)
-                else:
-                    # For other WebDriver errors, retry with a new driver
-                    if driver:
-                        headers_driver_pool.return_driver(driver)
-                        driver = None
-                    if attempt == max_retries - 1:
-                        return await get_media_dates_fallback(url)
-                    continue
+        logging.info(f"{prefix} Using WebDriver fallback method")
+        driver.set_page_load_timeout(15)  # Short timeout for headers
+        driver.get(url)
         
         try:
             WebDriverWait(driver, 10).until(
@@ -431,39 +555,24 @@ async def get_media_dates(url):
                 }]
     
     except WebDriverException as e:
-        logging.error(f"WebDriver error in get_media_dates: {str(e)}")
         error_message = str(e).lower()
-        if 'err_name_not_resolved' in error_message:
-            return [{
-                'type': 'Error',
-                'error': 'Unable to connect to the provided URL. The website may be offline or inaccessible.'
-            }]
-        elif 'err_connection_refused' in error_message:
-            return [{
-                'type': 'Error',
-                'error': 'Connection refused. The website is not accepting connections.'
-            }]
-        elif 'err_connection_timed_out' in error_message:
-            return [{
-                'type': 'Error',
-                'error': 'Connection timed out. The website took too long to respond.'
-            }]
-        elif 'err_ssl_protocol_error' in error_message:
-            return [{
-                'type': 'Error',
-                'error': 'SSL/TLS error. Could not establish a secure connection to the website.'
-            }]
+        if any(err in error_message for err in [
+            'err_name_not_resolved',
+            'err_connection_refused',
+            'err_connection_timed_out',
+            'err_ssl_protocol_error'
+        ]):
+            # For connection errors, try aiohttp approach
+            if driver:
+                headers_driver_pool.return_driver(driver)
+                driver = None
+            return await get_media_dates_fallback(url)
         else:
-            return [{
-                'type': 'Error',
-                'error': 'Unable to connect to the website. Please check if the URL is correct and the website is accessible.'
-            }]
-    except Exception as e:
-        logging.error(f"Error in get_media_dates: {str(e)}")
-        return [{
-            'type': 'Error',
-            'error': 'An error occurred while analyzing the website. Please try again later.'
-        }]
+            # For other WebDriver errors, return error
+            if driver:
+                headers_driver_pool.return_driver(driver)
+            return await get_media_dates_fallback(url)
+    
     finally:
         if driver:
             try:
