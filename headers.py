@@ -359,21 +359,21 @@ async def get_media_dates(url):
             
             # Try CDP method
             cdp_results = get_media_dates_with_cdp(driver, url)
-            if cdp_results:
-                logging.info(f"{prefix} CDP method successful, found {len(cdp_results)} results")
-                # Return driver to pool
-                headers_driver_pool.return_driver(driver)
-                return cdp_results
-            else:
-                logging.info(f"{prefix} CDP method found no results, will try fallback methods")
-                # Keep driver for fallback methods
+            # CDP succeeded - return results (even if empty)
+            logging.info(f"{prefix} CDP method completed, found {len(cdp_results)} results")
+            headers_driver_pool.return_driver(driver)
+            return cdp_results if cdp_results else [{
+                'type': 'Info',
+                'error': 'No media files with last-modified headers found'
+            }]
     except Exception as e:
         logging.warning(f"{prefix} CDP method failed: {str(e)}")
         if driver:
             headers_driver_pool.return_driver(driver)
             driver = None
+        # Only proceed to fallback if CDP actually failed
     
-    # If CDP method fails or finds no results, try aiohttp fallback
+    # If CDP method fails, try aiohttp fallback
     try:
         results = await get_media_dates_fallback(url)
         if results and not (len(results) == 1 and results[0].get('type') in ['Error', 'Info']):

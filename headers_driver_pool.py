@@ -24,7 +24,7 @@ class HeadersWebDriverPool:
             
         self._initialized = True
         self.pool = Queue()
-        self.max_drivers = 3  # Smaller pool for headers
+        self.max_drivers = 5  # Increased pool size for concurrent operations
         self.current_drivers = 0
         self.pool_lock = threading.Lock()
         self.driver_timeouts = {}
@@ -89,13 +89,11 @@ class HeadersWebDriverPool:
         # Store the user data directory path for cleanup
         self.user_data_dir = user_data_dir
         
-        # Enable CDP capabilities
-        from selenium.webdriver.common.desired_capabilities import DesiredCapabilities
-        caps = DesiredCapabilities.CHROME
-        caps['goog:loggingPrefs'] = {'performance': 'ALL'}
+        # Enable CDP capabilities - add logging preferences to Chrome options
+        chrome_options.set_capability('goog:loggingPrefs', {'performance': 'ALL'})
         
         service = Service()
-        driver = webdriver.Chrome(service=service, options=chrome_options, desired_capabilities=caps)
+        driver = webdriver.Chrome(service=service, options=chrome_options)
         driver.set_page_load_timeout(15)  # Shorter timeout for headers
         
         # Enable network domain for CDP
@@ -127,7 +125,7 @@ class HeadersWebDriverPool:
         except Exception:
             return False
 
-    def get_driver(self, timeout=5):  # Shorter timeout for headers
+    def get_driver(self, timeout=10):  # Increased timeout for concurrent operations
         """Get a WebDriver instance from the pool or create a new one"""
         try:
             # Check memory usage and cleanup if needed
@@ -171,7 +169,7 @@ class HeadersWebDriverPool:
                         logging.debug("Waiting for WebDriver to become available")
                         return self.pool.get(timeout=timeout)
                     except Empty:
-                        raise TimeoutError("No WebDriver instance available within timeout period")
+                        raise TimeoutError(f"No WebDriver instance available within {timeout}s timeout. Pool exhausted with {self.current_drivers}/{self.max_drivers} drivers.")
 
     def return_driver(self, driver):
         """Return a WebDriver instance to the pool"""
