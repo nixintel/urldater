@@ -142,6 +142,12 @@ window.addEventListener('load', function() {
     function resetToCleanState() {
         debugLog('Resetting to clean state');
         
+        // Hide the main results container first
+        const resultsContainer = document.getElementById('results');
+        if (resultsContainer) {
+            resultsContainer.style.display = 'none';
+        }
+        
         // Clear all result containers
         document.getElementById('domain-results').innerHTML = '';
         document.getElementById('headers-results').innerHTML = '';
@@ -181,6 +187,17 @@ window.addEventListener('load', function() {
         if (newSearchBtn) {
             newSearchBtn.style.display = 'none';
         }
+        
+        // Clear any timeline visualization
+        const timelineContainer = document.getElementById('visualization');
+        if (timelineContainer) {
+            timelineContainer.innerHTML = '';
+        }
+        
+        // Reset timeline checkboxes to checked state
+        document.getElementById('showRdap').checked = true;
+        document.getElementById('showCerts').checked = true;
+        document.getElementById('showHeaders').checked = true;
         
         debugLog('Clean state reset complete');
     }
