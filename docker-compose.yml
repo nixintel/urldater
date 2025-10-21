@@ -13,3 +13,13 @@ services:
       - /dev/shm:/dev/shm  # Proper shared memory allocation
     shm_size: '2gb'  # Increase shared memory size
     restart: unless-stopped
+    # Resource limits to prevent memory issues
+    mem_limit: 2g
+    mem_reservation: 1g
+    # Health check to monitor container status (reduced frequency to prevent interference)
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/"]
+      interval: 60s
+      timeout: 5s
+      retries: 2
+      start_period: 60s
