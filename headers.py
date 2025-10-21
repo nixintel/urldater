@@ -257,32 +257,40 @@ def get_media_dates_with_cdp(driver, url):
         # Clear any existing logs
         driver.get_log('performance')
         
-        # Navigate to the page
+        # Navigate to the page with shorter timeout
         logger.info(f"{prefix} Navigating to: {url}")
-        driver.set_page_load_timeout(15)
+        driver.set_page_load_timeout(10)  # Reduced from 15
         driver.get(url)
         
-        # Wait for page to load completely
+        # Wait for page to load (interactive or complete)
         try:
-            WebDriverWait(driver, 10).until(
-                lambda d: d.execute_script('return document.readyState') == 'complete'
+            WebDriverWait(driver, 3).until(
+                lambda d: d.execute_script('return document.readyState') in ['interactive', 'complete']
             )
-            logger.info(f"{prefix} Page load complete")
+            logger.info(f"{prefix} Page load complete (interactive or complete)")
         except TimeoutException:
             logger.warning(f"{prefix} Page load timeout - continuing with partial content")
         
-        # Wait a bit more for any lazy-loaded images
-        time.sleep(2)
+        # Reduced wait time
+        time.sleep(1)  # Reduced from 2
         
-        # Get performance logs
-        logs = driver.get_log('performance')
-        logger.info(f"{prefix} Retrieved {len(logs)} performance log entries")
+        # Get performance logs with error handling
+        try:
+            logs = driver.get_log('performance')
+            logger.info(f"{prefix} Retrieved {len(logs)} performance log entries")
+        except Exception as e:
+            logger.error(f"{prefix} Failed to get performance logs: {e}")
+            return []
         
-        # Parse logs for network responses
+        # Process logs with memory management
         media_responses = []
         processed_urls = set()  # Avoid duplicates
         
-        for log in logs:
+        # Limit the number of logs processed to prevent memory issues
+        max_logs = 1000
+        logs_to_process = logs[:max_logs] if len(logs) > max_logs else logs
+        
+        for log in logs_to_process:
             try:
                 message = json.loads(log['message'])
                 method = message['message'].get('method')
