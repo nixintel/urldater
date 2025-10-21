@@ -138,16 +138,84 @@ window.addEventListener('load', function() {
     window.headersPagination = { currentPage: 1, perPage: 10 };
     window.currentTimeline = null;
 
-    // Check for cached results
+    // Function to reset page to clean state
+    function resetToCleanState() {
+        debugLog('Resetting to clean state');
+        
+        // Clear all result containers
+        document.getElementById('domain-results').innerHTML = '';
+        document.getElementById('headers-results').innerHTML = '';
+        document.getElementById('ssl-certificate-results').innerHTML = '';
+        
+        // Hide all result sections
+        document.getElementById('domain-info').style.display = 'none';
+        document.getElementById('headers-info').style.display = 'none';
+        document.getElementById('ssl-certificate').style.display = 'none';
+        document.getElementById('timeline').style.display = 'none';
+        
+        // Clear the analyzed URL
+        document.getElementById('analyzed-url').textContent = '';
+        
+        // Clear form
+        document.getElementById('url').value = '';
+        
+        // Clear cached results
+        clearCache();
+        
+        // Reset global variables
+        window.domainResults = [];
+        window.certResults = [];
+        window.headerResults = [];
+        window.currentTimeline = null;
+        
+        // Destroy any existing DataTables
+        if ($.fn.DataTable.isDataTable('#domain-table')) {
+            $('#domain-table').DataTable().destroy();
+        }
+        if ($.fn.DataTable.isDataTable('#headers-table')) {
+            $('#headers-table').DataTable().destroy();
+        }
+        
+        // Hide the New Search button
+        const newSearchBtn = document.getElementById('newSearchBtn');
+        if (newSearchBtn) {
+            newSearchBtn.style.display = 'none';
+        }
+        
+        debugLog('Clean state reset complete');
+    }
+    
+    // Make resetToCleanState globally accessible
+    window.resetToCleanState = resetToCleanState;
+
+    // Check for cached results - only load if explicitly requested
     const cached = loadResults();
-    if (cached) {
+    const urlParams = new URLSearchParams(window.location.search);
+    const loadCached = urlParams.get('loadCached') === 'true';
+    
+    if (cached && loadCached) {
+        debugLog('Loading cached results');
         urlInput.value = cached.url;
         document.querySelector(`input[name="searchType"][value="${cached.searchType}"]`).checked = true;
         displayResults(cached.data, cached.searchType);
+    } else {
+        // Show clean landing page
+        debugLog('Showing clean landing page');
+        resetToCleanState();
     }
 
     // Attach submit handler
     searchForm.addEventListener('submit', handleSubmit);
+    
+    // Handle Home navigation - clear cached results when navigating to home
+    const homeLink = document.querySelector('a[href="/"]');
+    if (homeLink) {
+        homeLink.addEventListener('click', function(e) {
+            debugLog('Home link clicked - clearing cached results');
+            clearCache();
+            // The page will reload and show clean state
+        });
+    }
 
     function displayResults(data, searchType) {
         // Create timeline and update checkboxes
@@ -197,6 +265,12 @@ window.addEventListener('load', function() {
             } else {
                 displayCertificateResults(null);
             }
+        }
+        
+        // Show the New Search button when results are displayed
+        const newSearchBtn = document.getElementById('newSearchBtn');
+        if (newSearchBtn) {
+            newSearchBtn.style.display = 'inline-block';
         }
         
         results.style.display = 'block';

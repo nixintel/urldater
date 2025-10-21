@@ -24,7 +24,7 @@ class HeadersWebDriverPool:
             
         self._initialized = True
         self.pool = Queue()
-        self.max_drivers = 3  # Smaller pool for headers
+        self.max_drivers = 5  # Increased pool size for concurrent operations
         self.current_drivers = 0
         self.pool_lock = threading.Lock()
         self.driver_timeouts = {}
@@ -43,11 +43,15 @@ class HeadersWebDriverPool:
         chrome_options.add_argument('--no-sandbox')
         chrome_options.add_argument('--disable-dev-shm-usage')
         
+        # Enable Chrome DevTools Protocol for network monitoring
+        chrome_options.add_argument('--enable-logging')
+        chrome_options.add_argument('--log-level=0')
+        chrome_options.add_experimental_option('useAutomationExtension', False)
+        chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+        
         # Performance and stability options
         chrome_options.add_argument('--disable-gpu')
         chrome_options.add_argument('--disable-extensions')
-        chrome_options.add_argument('--disable-logging')
-        chrome_options.add_argument('--log-level=3')
         chrome_options.add_argument('--window-size=1920,1080')
         
         # Memory and process management
@@ -85,9 +89,20 @@ class HeadersWebDriverPool:
         # Store the user data directory path for cleanup
         self.user_data_dir = user_data_dir
         
+        # Enable CDP capabilities - add logging preferences to Chrome options
+        chrome_options.set_capability('goog:loggingPrefs', {'performance': 'ALL'})
+        
         service = Service()
         driver = webdriver.Chrome(service=service, options=chrome_options)
         driver.set_page_load_timeout(15)  # Shorter timeout for headers
+        
+        # Enable network domain for CDP
+        try:
+            driver.execute_cdp_cmd('Network.enable', {})
+            logging.debug("CDP Network domain enabled")
+        except Exception as e:
+            logging.warning(f"Failed to enable CDP Network domain: {e}")
+        
         return driver
         
     def _get_memory_usage(self):
@@ -110,7 +125,7 @@ class HeadersWebDriverPool:
         except Exception:
             return False
 
-    def get_driver(self, timeout=5):  # Shorter timeout for headers
+    def get_driver(self, timeout=10):  # Increased timeout for concurrent operations
         """Get a WebDriver instance from the pool or create a new one"""
         try:
             # Check memory usage and cleanup if needed
@@ -154,7 +169,7 @@ class HeadersWebDriverPool:
                         logging.debug("Waiting for WebDriver to become available")
                         return self.pool.get(timeout=timeout)
                     except Empty:
-                        raise TimeoutError("No WebDriver instance available within timeout period")
+                        raise TimeoutError(f"No WebDriver instance available within {timeout}s timeout. Pool exhausted with {self.current_drivers}/{self.max_drivers} drivers.")
 
     def return_driver(self, driver):
         """Return a WebDriver instance to the pool"""

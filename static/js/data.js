@@ -96,8 +96,16 @@ export function displayHeadersResults(data) {
         return;
     }
 
-    // Check if the response contains an error or info message
-    if (data[0].error || data[0].type === 'Info' || data[0].type === 'Error') {
+    // Filter out info/error messages to get only valid results
+    const validResults = data.filter(item => 
+        item.type && 
+        item.type !== 'Info' && 
+        item.type !== 'Error' && 
+        !item.error
+    );
+
+    // If no valid results, show the first info/error message
+    if (validResults.length === 0) {
         // Don't show the table headers for info/error messages
         const table = document.getElementById('headers-table');
         if (table) {
@@ -120,15 +128,22 @@ export function displayHeadersResults(data) {
         return;
     }
 
-    // Store the data for filtering
-    window.headerResults = data;
+    // Show table headers for valid results
+    const table = document.getElementById('headers-table');
+    if (table) {
+        const thead = table.querySelector('thead');
+        if (thead) thead.style.display = '';
+    }
+
+    // Store the valid results for filtering
+    window.headerResults = validResults;
 
     // Destroy existing DataTable if it exists
     if ($.fn.DataTable.isDataTable('#headers-table')) {
         $('#headers-table').DataTable().destroy();
     }
 
-    let filteredResults = [...data];
+    let filteredResults = [...validResults];
     if (filterValue !== 'all') {
         filteredResults = filteredResults.filter(item => 
             item.type.toLowerCase() === filterValue.toLowerCase()

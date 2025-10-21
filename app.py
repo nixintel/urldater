@@ -36,10 +36,11 @@ app.logger.setLevel(logging.DEBUG)
 # Add this near your other imports
 markdowner = Markdown()
 
-# Add markdown filter
-@app.template_filter('markdown')
-def markdown_filter(text):
-    return markdowner.convert(text)
+# Global error handler to ensure all errors return JSON
+@app.errorhandler(Exception)
+def handle_exception(e):
+    logging.error(f"Unhandled exception: {str(e)}", exc_info=True)
+    return jsonify({'error': 'An unexpected error occurred. Please try again later.'}), 500
 
 @app.before_request
 def log_all_requests():
