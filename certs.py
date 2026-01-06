@@ -41,11 +41,17 @@ async def get_certificate_json(domain):
                 
                 if response.status != 200:
                     logger.error(f"{prefix} Error response from crt.sh: {response.status}")
+                    if response.status in [503, 502, 500]:
+                        message = 'Crt.sh is temporarily unavailable. Please try again in a few minutes.'
+                    elif response.status == 404:
+                        message = 'No SSL certificate history found for this domain.'
+                    else:
+                        message = f'Crt.sh returned an error (HTTP {response.status}). Please try again later.'
                     return {
                         'type': 'SSL Certificate',
                         'error': f'HTTP {response.status}',
                         'status': 'Error',
-                        'message': 'Failed to retrieve certificate data from crt.sh'
+                        'message': message
                     }
                 
                 try:
@@ -56,7 +62,7 @@ async def get_certificate_json(domain):
                         'type': 'SSL Certificate',
                         'error': 'Invalid JSON response',
                         'status': 'Error',
-                        'message': 'Invalid response format from crt.sh'
+                        'message': 'Received invalid data from crt.sh. Please try again later.'
                     }
                 
                 if not certs:
@@ -65,7 +71,7 @@ async def get_certificate_json(domain):
                         'type': 'SSL Certificate',
                         'error': 'No Certificates Found',
                         'status': 'Not Found',
-                        'message': 'No SSL certificates found for this domain'
+                        'message': 'No SSL certificate history found for this domain.'
                     }
                 
                 # Sort by entry_timestamp to get the oldest certificate
@@ -93,7 +99,7 @@ async def get_certificate_json(domain):
             'type': 'SSL Certificate',
             'error': 'Connection Error',
             'status': 'Error',
-            'message': 'Failed to connect to crt.sh'
+            'message': 'Unable to connect to crt.sh. Please check the connection and try again.'
         }
     except Exception as e:
         logger.error(f"{prefix} Unexpected error: {e}")
@@ -101,7 +107,7 @@ async def get_certificate_json(domain):
             'type': 'SSL Certificate',
             'error': str(e),
             'status': 'Error',
-            'message': 'An unexpected error occurred while retrieving certificate data'
+            'message': 'An unexpected error occurred while retrieving certificate data. Please try again later.'
         }
 
 async def check_crtsh_status():
@@ -118,7 +124,7 @@ async def check_crtsh_status():
                         'type': 'SSL Certificate',
                         'error': f'HTTP {response.status}',
                         'status': 'Service Unavailable',
-                        'message': 'The certificate service is currently unavailable. Please try again later.'
+                        'message': 'Crt.sh is temporarily unavailable. Please try again in a few minutes.'
                     }
                 return True, None
     except Exception as e:
@@ -127,7 +133,7 @@ async def check_crtsh_status():
             'type': 'SSL Certificate',
             'error': 'Service unavailable',
             'status': 'Service Unavailable',
-            'message': 'Unable to connect to the certificate service. Please try again later.'
+            'message': 'Unable to connect to crt.sh. Please check the connection and try again.'
         }
 
 async def get_first_certificate(domain):
@@ -178,7 +184,7 @@ async def get_first_certificate(domain):
         'type': 'SSL Certificate',
         'error': f"Failed after {max_retries} attempts",
         'status': 'Error',
-        'message': 'Unable to retrieve certificate data from crt.sh'
+        'message': 'Unable to retrieve certificate data from crt.sh after multiple attempts. Please try again later.'
     }
 
 def get_certificate_data(domain):

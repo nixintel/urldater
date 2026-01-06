@@ -170,6 +170,29 @@
         margin-top: 5px;
     }
 
+    #form-info {
+        background-color: #f8f9fa;
+        border: 1px solid #dee2e6;
+        border-radius: 4px;
+        padding: 20px;
+    }
+
+    #form-info h1 {
+        font-size: 1.5rem;
+        margin-bottom: 1rem;
+    }
+
+    #form-info ul {
+        margin-bottom: 1rem;
+    }
+
+    #form-info blockquote {
+        border-left: 4px solid #007bff;
+        padding-left: 1rem;
+        margin: 1rem 0;
+        color: #6c757d;
+    }
+
     /* Export button colors */
     .btn-export-png {
         background-color: #28a745;
@@ -249,6 +272,13 @@
         </div>
     </form>
 
+    <!-- Form Info Section -->
+    <div id="form-info" class="mt-4">
+        {% filter markdown %}
+            {% include 'form_info.md' %}
+        {% endfilter %}
+    </div>
+
     <!-- Loading Spinner -->
     <div id="spinner" class="spinner-container">
         <div class="spinner-border text-primary" role="status">
@@ -269,6 +299,9 @@
             </button>
             <button class="btn btn-danger btn-export-pdf" onclick="exportAsPDF()">
                 <i class="bi bi-file-pdf"></i> Save as PDF
+            </button>
+            <button id="newSearchBtn" class="btn btn-secondary" onclick="resetToCleanState()" style="display: none;">
+                <i class="bi bi-arrow-clockwise"></i> New Search
             </button>
             <div id="export-spinner" class="spinner-border text-primary" role="status" style="display: none;">
                 <span class="visually-hidden">Exporting...</span>

@@ -11,5 +11,15 @@ services:
     volumes:
       - .:/app  # Mount the entire application directory
       - /dev/shm:/dev/shm  # Proper shared memory allocation
-    shm_size: '2gb'  # Increase shared memory size
+    shm_size: '2gb'  # Shared memory size for DO droplet.
     restart: unless-stopped
+    # Resource limits to prevent memory issues, can be adjusted for larger servers/self-hosting
+    mem_limit: 2g
+    mem_reservation: 1g
+    # Health check to monitor container status 
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/"]
+      interval: 60s
+      timeout: 5s
+      retries: 2
+      start_period: 60s

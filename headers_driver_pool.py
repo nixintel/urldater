@@ -28,7 +28,7 @@ class HeadersWebDriverPool:
             
         self._initialized = True
         self.pool = Queue()
-        self.max_drivers = 3  # Smaller pool for headers
+        self.max_drivers = 5  # Increased pool size for concurrent operations
         self.current_drivers = 0
         self.pool_lock = threading.Lock()
         self.driver_timeouts = {}
@@ -44,11 +44,15 @@ class HeadersWebDriverPool:
         chrome_options.add_argument('--no-sandbox')
         chrome_options.add_argument('--disable-dev-shm-usage')
         
+        # Enable Chrome DevTools Protocol for network monitoring
+        chrome_options.add_argument('--enable-logging')
+        chrome_options.add_argument('--log-level=0')
+        chrome_options.add_experimental_option('useAutomationExtension', False)
+        chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+        
         # Performance and stability options
         chrome_options.add_argument('--disable-gpu')
         chrome_options.add_argument('--disable-extensions')
-        chrome_options.add_argument('--disable-logging')
-        chrome_options.add_argument('--log-level=3')
         chrome_options.add_argument('--window-size=1920,1080')
         
         # Memory and process management
@@ -86,9 +90,20 @@ class HeadersWebDriverPool:
         # Store the user data directory path for cleanup
         self.user_data_dir = user_data_dir
         
+        # Enable CDP capabilities - add logging preferences to Chrome options
+        chrome_options.set_capability('goog:loggingPrefs', {'performance': 'ALL'})
+        
         service = Service()
         driver = webdriver.Chrome(service=service, options=chrome_options)
         driver.set_page_load_timeout(15)  # Shorter timeout for headers
+        
+        # Enable network domain for CDP
+        try:
+            driver.execute_cdp_cmd('Network.enable', {})
+            logging.debug("CDP Network domain enabled")
+        except Exception as e:
+            logging.warning(f"Failed to enable CDP Network domain: {e}")
+        
         return driver
         
     def _get_memory_usage(self):
@@ -111,7 +126,7 @@ class HeadersWebDriverPool:
         except Exception:
             return False
 
-    def get_driver(self, timeout=5):  # Shorter timeout for headers
+    def get_driver(self, timeout=10):  # Increased timeout for concurrent operations
         """Get a WebDriver instance from the pool or create a new one"""
         try:
             # Check memory usage and cleanup if needed
@@ -162,7 +177,7 @@ class HeadersWebDriverPool:
                         logging.debug("Waiting for WebDriver to become available")
                         return self.pool.get(timeout=timeout)
                     except Empty:
-                        raise TimeoutError("No WebDriver instance available within timeout period")
+                        raise TimeoutError(f"No WebDriver instance available within {timeout}s timeout. Pool exhausted with {self.current_drivers}/{self.max_drivers} drivers.")
 
     def return_driver(self, driver):
         """Return a WebDriver instance to the pool"""
@@ -205,7 +220,7 @@ class HeadersWebDriverPool:
                 self._cleanup_driver(driver)
 
     def _cleanup_driver(self, driver):
-        """Clean up a WebDriver instance with enhanced error recovery"""
+        """Clean up a WebDriver instance with enhanced error recovery and session validation"""
         if not driver:
             return
             
@@ -234,6 +249,7 @@ class HeadersWebDriverPool:
                 try:
                     driver.execute_script("window.localStorage.clear();")
                     driver.execute_script("window.sessionStorage.clear();")
+                    driver.delete_all_cookies()
                     logging.debug("Cleared browser storage")
                 except Exception as e:
                     logging.debug(f"Session died between checks: {str(e)}")
@@ -255,18 +271,18 @@ class HeadersWebDriverPool:
             except Exception as e:
                 logging.warning(f"Error quitting driver: {str(e)}")
                 
-            # If normal quit failed, try force quit
+            # If normal quit failed or session was invalid, try force quit
             if not cleanup_success:
                 try:
                     process = psutil.Process(driver.service.process.pid)
                     for child in process.children(recursive=True):
                         try:
                             child.terminate()
-                            child.wait(timeout=3)
-                        except:
-                            child.kill()
+                            child.wait(timeout=3)  # Wait for process to terminate
+                        except psutil.TimeoutExpired:
+                            child.kill()  # Force kill if terminate doesn't work
                     process.terminate()
-                    process.wait(timeout=3)
+                    process.wait(timeout=3)  # Wait for main process to terminate
                     cleanup_success = True
                 except Exception as e:
                     logging.error(f"Error force quitting driver: {str(e)}")

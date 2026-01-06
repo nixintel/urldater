@@ -3,7 +3,8 @@ FROM python:3.11-slim
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1 \
-    DEBIAN_FRONTEND=noninteractive
+    DEBIAN_FRONTEND=noninteractive \
+    PIP_ROOT_USER_ACTION=ignore
 
 # Install system dependencies and Google Chrome
 RUN apt-get update && apt-get install -y \
@@ -39,10 +40,11 @@ RUN CHROME_VERSION=$(google-chrome-stable --version | awk '{print $3}') \
 # Create and set the working directory
 WORKDIR /app
 
-# Create a directory for requirements
-COPY requirements.txt /tmp/
-RUN pip install --no-cache-dir -r /tmp/requirements.txt \
-    && rm /tmp/requirements.txt
+# Copy application files
+COPY . /app/
+
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Expose the port the app runs on
 EXPOSE 5000

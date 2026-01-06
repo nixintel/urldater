@@ -1,6 +1,6 @@
 print("Starting Flask app...")
 
-from flask import Flask, render_template, request, jsonify, send_file
+from flask import Flask, Blueprint, render_template, request, jsonify, send_file
 import validators
 import logging
 import pandas as pd
@@ -21,15 +21,46 @@ from certs import get_first_certificate, extract_main_domain, get_certificate_da
 from chrome_driver_pool import driver_pool
 
 app = Flask(__name__)
-logging.basicConfig(level=logging.DEBUG)
+
+# Configure detailed logging
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s [%(levelname)s] %(name)s - %(message)s',
+    handlers=[
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
+app.logger.setLevel(logging.DEBUG)
 
 # Add this near your other imports
 markdowner = Markdown()
 
+# Add markdown filter
+@app.template_filter('markdown')
+def markdown_filter(text):
+    return markdowner.convert(text)
+
+# Global error handler to ensure all errors return JSON
+@app.errorhandler(Exception)
+def handle_exception(e):
+    logging.error(f"Unhandled exception: {str(e)}", exc_info=True)
+    return jsonify({'error': 'An unexpected error occurred. Please try again later.'}), 500
+
 @app.before_request
-def log_request_info():
-    app.logger.debug('Headers: %s', request.headers)
-    app.logger.debug('Body: %s', request.get_data())
+def log_all_requests():
+    logger.debug("=" * 80)
+    logger.debug(f"Request Method: {request.method}")
+    logger.debug(f"Request URL: {request.url}")
+    logger.debug(f"Request Path: {request.path}")
+    logger.debug(f"Request Headers: {dict(request.headers)}")
+    if request.is_json:
+        try:
+            logger.debug(f"Request JSON: {request.get_json()}")
+        except Exception as e:
+            logger.debug(f"Raw Request Data: {request.get_data(as_text=True)}")
+            logger.debug(f"Failed to parse JSON: {str(e)}")
+    logger.debug("=" * 80)
 
 @app.route('/', methods=['GET'])
 def index():
@@ -42,18 +73,25 @@ def index():
 
 @app.route('/analyze', methods=['POST'])
 async def analyze():
-    logging.debug("Analyze route called")
+    logger.debug("Analyze route called with:")
+    logger.debug(f"Headers: {dict(request.headers)}")
+    logger.debug(f"Raw Data: {request.get_data(as_text=True)}")
+    logger.debug(f"Content Type: {request.content_type}")
+    logger.debug(f"Mimetype: {request.mimetype}")
+    
     try:
         # Validate content type
         if not request.is_json:
-            logging.error("Invalid content type, expected application/json")
+            logger.error(f"Invalid content type: {request.content_type}, expected application/json")
             return jsonify({'error': 'Invalid content type, expected application/json'}), 415
             
         try:
             # Get JSON data from request
             data = request.get_json()
+            logger.debug(f"Parsed JSON data: {data}")
         except Exception as e:
-            logging.error(f"Failed to parse JSON data: {str(e)}")
+            logger.error(f"Failed to parse JSON data: {str(e)}")
+            logger.error(f"Raw request data: {request.get_data(as_text=True)}")
             return jsonify({'error': 'Invalid JSON format'}), 400
             
         if not data or 'url' not in data:

@@ -1,6 +1,6 @@
 // Main application logic
 import { createTimeline } from './timeline.js';
-import { saveResults, loadResults } from './cache.js';
+import { saveResults, loadResults, clearCache } from './cache.js';
 import { displayDomainResults, displayHeadersResults, displayCertificateResults } from './data.js';
 
 // Wait for DOM and modules to load
@@ -42,16 +42,23 @@ window.addEventListener('load', function() {
         const url = urlInput.value;
         const searchType = document.querySelector('input[name="searchType"]:checked').value;
         
+        // Clear cache if the URL or search type is different from cached data
+        const cached = loadResults();
+        if (cached && (cached.url !== url || cached.searchType !== searchType)) {
+            clearCache();
+        }
+        
         // Set the analyzed URL in the results title
         document.getElementById('analyzed-url').textContent = url;
         
         debugLog('URL:', url);
         debugLog('Search Type:', searchType);
         
-        // Show spinner and hide previous results/errors
+        // Show spinner and hide previous results/errors and form info
         spinner.style.display = 'block';
         if (results) results.style.display = 'none';
         if (errorDiv) errorDiv.classList.add('d-none');
+        document.getElementById('form-info').style.display = 'none';
 
         // Clean up existing DataTables instances
         if ($.fn.DataTable.isDataTable('#domain-table')) {
@@ -136,12 +143,97 @@ window.addEventListener('load', function() {
     window.headersPagination = { currentPage: 1, perPage: 10 };
     window.currentTimeline = null;
 
-    // 4. Finally check cache
+    // Function to reset page to clean state
+    function resetToCleanState() {
+        debugLog('Resetting to clean state');
+        
+        // Hide the main results container first
+        const resultsContainer = document.getElementById('results');
+        if (resultsContainer) {
+            resultsContainer.style.display = 'none';
+        }
+        
+        // Clear all result containers
+        document.getElementById('domain-results').innerHTML = '';
+        document.getElementById('headers-results').innerHTML = '';
+        document.getElementById('ssl-certificate-results').innerHTML = '';
+        
+        // Hide all result sections
+        document.getElementById('domain-info').style.display = 'none';
+        document.getElementById('headers-info').style.display = 'none';
+        document.getElementById('ssl-certificate').style.display = 'none';
+        document.getElementById('timeline').style.display = 'none';
+        
+        // Clear the analyzed URL
+        document.getElementById('analyzed-url').textContent = '';
+        
+        // Clear form
+        document.getElementById('url').value = '';
+        
+        // Clear cached results
+        clearCache();
+        
+        // Reset global variables
+        window.domainResults = [];
+        window.certResults = [];
+        window.headerResults = [];
+        window.currentTimeline = null;
+        
+        // Destroy any existing DataTables
+        if ($.fn.DataTable.isDataTable('#domain-table')) {
+            $('#domain-table').DataTable().destroy();
+        }
+        if ($.fn.DataTable.isDataTable('#headers-table')) {
+            $('#headers-table').DataTable().destroy();
+        }
+        
+        // Hide the New Search button
+        const newSearchBtn = document.getElementById('newSearchBtn');
+        if (newSearchBtn) {
+            newSearchBtn.style.display = 'none';
+        }
+        
+        // Clear any timeline visualization
+        const timelineContainer = document.getElementById('visualization');
+        if (timelineContainer) {
+            timelineContainer.innerHTML = '';
+        }
+        
+        // Reset timeline checkboxes to checked state
+        document.getElementById('showRdap').checked = true;
+        document.getElementById('showCerts').checked = true;
+        document.getElementById('showHeaders').checked = true;
+        
+        debugLog('Clean state reset complete');
+    }
+    
+    // Make resetToCleanState globally accessible
+    window.resetToCleanState = resetToCleanState;
+
+    // 4. Finally check cache - only load if explicitly requested
     const cached = loadResults();
-    if (cached) {
+    const urlParams = new URLSearchParams(window.location.search);
+    const loadCached = urlParams.get('loadCached') === 'true';
+    
+    if (cached && loadCached) {
+        debugLog('Loading cached results');
         urlInput.value = cached.url;
         document.querySelector(`input[name="searchType"][value="${cached.searchType}"]`).checked = true;
         displayResults(cached.data, cached.searchType);
+    } else {
+        // Show clean landing page
+        debugLog('Showing clean landing page');
+        resetToCleanState();
+    }
+
+    // Handle Home navigation - clear cached results when navigating to home
+    const homeLink = document.querySelector('a[href="/"]');
+    if (homeLink) {
+        homeLink.addEventListener('click', function(e) {
+            debugLog('Home link clicked - clearing cached results');
+            clearCache();
+            // The page will reload and show clean state
+        });
     }
 
     function displayResults(data, searchType) {
@@ -192,6 +284,12 @@ window.addEventListener('load', function() {
             } else {
                 displayCertificateResults(null);
             }
+        }
+        
+        // Show the New Search button when results are displayed
+        const newSearchBtn = document.getElementById('newSearchBtn');
+        if (newSearchBtn) {
+            newSearchBtn.style.display = 'inline-block';
         }
         
         results.style.display = 'block';
