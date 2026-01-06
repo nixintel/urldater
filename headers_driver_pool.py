@@ -128,6 +128,12 @@ class HeadersWebDriverPool:
 
     def get_driver(self, timeout=10):  # Increased timeout for concurrent operations
         """Get a WebDriver instance from the pool or create a new one"""
+        # Hypothesis A,D: Log pool state at entry
+        mem_usage = self._get_memory_usage()
+        mem_threshold_hit = self._check_memory_threshold()
+        pool_size = self.pool.qsize()
+        logging.info(f"[HEADERS_POOL] [DEBUG-H:A,D] get_driver entry - memory_mb={mem_usage:.2f}, current_drivers={self.current_drivers}/{self.max_drivers}, pool_size={pool_size}, mem_threshold_hit={mem_threshold_hit}")
+        
         try:
             # Check memory usage and cleanup if needed
             if self._check_memory_threshold():
@@ -138,6 +144,11 @@ class HeadersWebDriverPool:
             driver = self.pool.get(timeout=timeout)
             
             # Verify driver health
+            # Hypothesis D: Log health check
+            health_ok = self._check_driver_health(driver)
+            driver_id = id(driver)
+            logging.info(f"[HEADERS_POOL] [DEBUG-H:D] driver health check - health_ok={health_ok}, driver_id={driver_id}")
+            
             if not self._check_driver_health(driver):
                 logging.warning("Retrieved unhealthy driver, cleaning up and retrying")
                 self._cleanup_driver(driver)
@@ -162,13 +173,27 @@ class HeadersWebDriverPool:
                     # Try to create driver first, only increment counter on success
                     try:
                         logging.debug(f"Attempting to create new WebDriver for headers")
+                        # Hypothesis A,D: Log before creating driver
+                        mem_before_create = self._get_memory_usage()
+                        logging.info(f"[HEADERS_POOL] [DEBUG-H:A,D] creating new driver - current_drivers={self.current_drivers}, memory_mb={mem_before_create:.2f}")
+                        
                         driver = self._create_driver()
                         # Only increment counter after successful creation
                         self.current_drivers += 1
                         logging.debug(f"Successfully created WebDriver for headers (total: {self.current_drivers})")
                         self.driver_timeouts[id(driver)] = time.time()
+                        
+                        # Hypothesis A,D: Log successful creation
+                        driver_id = id(driver)
+                        session_id = driver.session_id
+                        logging.info(f"[HEADERS_POOL] [DEBUG-H:A,D] driver created successfully - driver_id={driver_id}, session_id={session_id}, total_drivers={self.current_drivers}")
+                        
                         return driver
                     except Exception as e:
+                        # Hypothesis A: Log creation failure
+                        error_type = type(e).__name__
+                        error_msg = str(e)[:500]
+                        logging.error(f"[HEADERS_POOL] [DEBUG-H:A] driver creation FAILED - error_type={error_type}, error_msg={error_msg}")
                         logging.error(f"Failed to create driver: {e}")
                         raise TimeoutError(f"Unable to create WebDriver: {str(e)}")
                 else:
