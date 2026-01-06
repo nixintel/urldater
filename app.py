@@ -16,7 +16,7 @@ import os
 import atexit
 
 from headers import get_media_dates
-from rdap import get_domain_info
+from rdap import get_domain_info, get_domain_info_async
 from certs import get_first_certificate, extract_main_domain, get_certificate_data
 from chrome_driver_pool import driver_pool
 
@@ -82,17 +82,21 @@ async def analyze():
             if search_type == 'all':
                 logging.debug("Getting all data types concurrently...")
                 
-                # Get RDAP data synchronously first
-                try:
-                    all_results['rdap'] = get_domain_info(url)
-                except Exception as e:
-                    logging.error(f"Error getting RDAP data: {str(e)}")
-                    all_results['rdap'] = [{
-                        'type': 'Error',
-                        'error': f'Error retrieving RDAP data: {str(e)}'
-                    }]
+                # Define async functions for all data sources
+                async def fetch_rdap():
+                    try:
+                        results = await get_domain_info_async(domain)
+                        return results if results else [{
+                            'type': 'Error',
+                            'error': 'No RDAP data could be found.'
+                        }]
+                    except Exception as e:
+                        logging.error(f"Error getting RDAP data: {str(e)}")
+                        return [{
+                            'type': 'Error',
+                            'error': f'Error retrieving RDAP data: {str(e)}'
+                        }]
 
-                # Then get headers and certs concurrently
                 async def fetch_headers():
                     try:
                         results = await get_media_dates(url)
@@ -129,14 +133,15 @@ async def analyze():
                 logging.info(f"[TASKS] Starting concurrent execution at {tasks_started}")
                 
                 try:
-                    # Run headers and certs tasks concurrently
+                    # Run all three tasks concurrently
+                    rdap_task = asyncio.create_task(fetch_rdap())
                     headers_task = asyncio.create_task(fetch_headers())
                     certs_task = asyncio.create_task(fetch_certs())
-                    active_tasks = [headers_task, certs_task]
+                    active_tasks = [rdap_task, headers_task, certs_task]
                     
                     try:
-                        # Wait for both tasks with a timeout
-                        all_results['headers'], all_results['certs'] = await asyncio.wait_for(
+                        # Wait for all tasks with a timeout
+                        all_results['rdap'], all_results['headers'], all_results['certs'] = await asyncio.wait_for(
                             asyncio.gather(*active_tasks, return_exceptions=True),
                             timeout=60  # 60 second timeout for concurrent execution
                         )
@@ -157,6 +162,7 @@ async def analyze():
                         
                         # Run sequentially
                         logging.info("[TASKS] Starting sequential execution after timeout")
+                        all_results['rdap'] = await fetch_rdap()
                         all_results['headers'] = await fetch_headers()
                         all_results['certs'] = await fetch_certs()
                         
@@ -164,6 +170,7 @@ async def analyze():
                     logging.error(f"[TASKS] Error during concurrent execution: {str(e)}")
                     # Run sequentially as fallback
                     logging.info("[TASKS] Starting sequential execution after error")
+                    all_results['rdap'] = await fetch_rdap()
                     all_results['headers'] = await fetch_headers()
                     all_results['certs'] = await fetch_certs()
                 
@@ -192,7 +199,7 @@ async def analyze():
                 
             elif search_type == 'rdap':
                 logging.info("[ANALYZE] Starting RDAP lookup")
-                results = get_domain_info(url)
+                results = await get_domain_info_async(domain)
                 logging.info("[ANALYZE] RDAP lookup completed")
                 return jsonify(results if results else [])
                 
