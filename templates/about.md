@@ -3,9 +3,10 @@
 
 
 ### What is URL Dater?
-URL Dater is a utility that helps researchers to investigate websites by providing reliable sources of information about the age of a website and its content. It is intended to help date a website and its content accurately and discover editorial changes.  
 
-It does this by gathering information about the domain's registration date, SSL certificate history, and the Last-Modified header timestamp of images embedded in the websites. It combines multiple techniques to provide a comprehensive view of a website's history and content.
+URL Dater is a utility that helps researchers by providing reliable sources of information about the age of a website and its content. It is intended to provide accurate date information and also to discover editorial changes.  
+
+It does this by gathering information about the domain's registration date, SSL certificate history, and the Last-Modified header timestamp of images embedded in the websites. It combines multiple techniques to provide a comprehensive view of a website's history and content and provides a timeline of a website's history.
 
 It is possible to run each module individually or all three at once.
 

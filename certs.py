@@ -72,15 +72,15 @@ async def get_certificate_json(domain):
                 certs.sort(key=lambda x: x['entry_timestamp'])
                 oldest_cert = certs[0]
                 
-                # Convert dates to the standard format 
+                # Convert dates to the standard format: DD-MM-YYYY HH:MM:SS UTC
                 entry_date = datetime.fromisoformat(oldest_cert['entry_timestamp'].replace('Z', '+00:00'))
                 valid_from = datetime.fromisoformat(oldest_cert['not_before'].replace('Z', '+00:00'))
                 
                 cert_data = {
                     'type': 'SSL Certificate',
                     'Common Name': oldest_cert['common_name'],
-                    'First Seen': entry_date.strftime('%d-%m-%Y'),
-                    'Valid From': valid_from.strftime('%d-%m-%Y'),
+                    'First Seen': entry_date.strftime('%d-%m-%Y %H:%M:%S UTC'),
+                    'Valid From': valid_from.strftime('%d-%m-%Y %H:%M:%S UTC'),
                     'Source': f"https://crt.sh/?id={oldest_cert['id']}"
                 }
                 

@@ -6,6 +6,10 @@ import threading
 from queue import Queue, Empty
 import time
 import psutil
+import os
+import tempfile
+import shutil
+import gc
 
 class HeadersWebDriverPool:
     _instance = None
@@ -33,9 +37,6 @@ class HeadersWebDriverPool:
         
     def _create_driver(self):
         """Create a new Chrome WebDriver instance optimized for header retrieval"""
-        import os
-        import tempfile
-        
         chrome_options = Options()
         
         # Essential options for Docker environment
@@ -143,11 +144,18 @@ class HeadersWebDriverPool:
                         except Empty:
                             raise TimeoutError("Memory usage too high and no drivers available")
                     
-                    self.current_drivers += 1
-                    logging.debug(f"Creating new WebDriver for headers (total: {self.current_drivers})")
-                    driver = self._create_driver()
-                    self.driver_timeouts[id(driver)] = time.time()
-                    return driver
+                    # Try to create driver first, only increment counter on success
+                    try:
+                        logging.debug(f"Attempting to create new WebDriver for headers")
+                        driver = self._create_driver()
+                        # Only increment counter after successful creation
+                        self.current_drivers += 1
+                        logging.debug(f"Successfully created WebDriver for headers (total: {self.current_drivers})")
+                        self.driver_timeouts[id(driver)] = time.time()
+                        return driver
+                    except Exception as e:
+                        logging.error(f"Failed to create driver: {e}")
+                        raise TimeoutError(f"Unable to create WebDriver: {str(e)}")
                 else:
                     # If at max drivers, wait for one to become available
                     try:
@@ -160,16 +168,31 @@ class HeadersWebDriverPool:
         """Return a WebDriver instance to the pool"""
         if driver:
             try:
+                # Validate session before clearing
+                try:
+                    _ = driver.session_id
+                    session_valid = True
+                except Exception as e:
+                    logging.warning(f"Session invalid on return: {e}")
+                    self._cleanup_driver(driver)
+                    return
+                
                 # Check driver health before returning to pool
                 if not self._check_driver_health(driver):
                     logging.warning("Unhealthy driver detected in headers pool, cleaning up")
                     self._cleanup_driver(driver)
                     return
 
-                # Reset the driver state
-                driver.delete_all_cookies()
-                driver.execute_script("window.localStorage.clear();")
-                driver.execute_script("window.sessionStorage.clear();")
+                # Reset the driver state (only if session valid)
+                if session_valid:
+                    try:
+                        driver.delete_all_cookies()
+                        driver.execute_script("window.localStorage.clear();")
+                        driver.execute_script("window.sessionStorage.clear();")
+                    except Exception as e:
+                        logging.warning(f"Error clearing driver state: {e}")
+                        self._cleanup_driver(driver)
+                        return
                 
                 # Update last used time
                 self.driver_timeouts[id(driver)] = time.time()
@@ -188,6 +211,16 @@ class HeadersWebDriverPool:
             
         driver_id = id(driver)
         cleanup_success = False
+        session_valid = False
+        
+        # Check session validity BEFORE any operation
+        try:
+            _ = driver.session_id
+            _ = driver.current_url  # Double check
+            session_valid = True
+            logging.debug(f"Session {driver.session_id} is valid for cleanup")
+        except Exception as e:
+            logging.debug(f"Session already invalid during cleanup: {str(e)}")
         
         try:
             # First try to get the user data directory path before closing the driver
@@ -196,16 +229,26 @@ class HeadersWebDriverPool:
             except:
                 user_data_dir = getattr(self, 'user_data_dir', None)
             
-            # Try to close all windows first
-            try:
-                if hasattr(driver, 'window_handles'):
-                    for handle in driver.window_handles:
-                        driver.switch_to.window(handle)
-                        driver.close()
-            except Exception as e:
-                logging.debug(f"Error closing windows: {str(e)}")
+            # Only clear data if session is valid
+            if session_valid:
+                try:
+                    driver.execute_script("window.localStorage.clear();")
+                    driver.execute_script("window.sessionStorage.clear();")
+                    logging.debug("Cleared browser storage")
+                except Exception as e:
+                    logging.debug(f"Session died between checks: {str(e)}")
             
-            # Try to quit the driver
+            # Try to close all windows first (only if session valid)
+            if session_valid:
+                try:
+                    if hasattr(driver, 'window_handles'):
+                        for handle in driver.window_handles:
+                            driver.switch_to.window(handle)
+                            driver.close()
+                except Exception as e:
+                    logging.debug(f"Error closing windows: {str(e)}")
+            
+            # Always try to quit the driver
             try:
                 driver.quit()
                 cleanup_success = True
@@ -215,7 +258,6 @@ class HeadersWebDriverPool:
             # If normal quit failed, try force quit
             if not cleanup_success:
                 try:
-                    import psutil
                     process = psutil.Process(driver.service.process.pid)
                     for child in process.children(recursive=True):
                         try:
@@ -232,7 +274,6 @@ class HeadersWebDriverPool:
             # Clean up user data directory
             if user_data_dir:
                 try:
-                    import shutil
                     if os.path.exists(user_data_dir):
                         shutil.rmtree(user_data_dir, ignore_errors=True)
                         logging.info(f"Cleaned up user data directory: {user_data_dir}")
@@ -249,7 +290,6 @@ class HeadersWebDriverPool:
                     
             # Force garbage collection after cleanup
             try:
-                import gc
                 gc.collect()
             except Exception as e:
                 logging.debug(f"Error in garbage collection: {str(e)}")
