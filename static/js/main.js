@@ -34,7 +34,7 @@ window.addEventListener('load', function() {
 
     debugLog('Form found:', searchForm);
     
-    // Form submission handler
+    // 1. Define handler function first
     const handleSubmit = async function(event) {
         event.preventDefault();
         debugLog('Form submitted');
@@ -60,6 +60,10 @@ window.addEventListener('load', function() {
         if ($.fn.DataTable.isDataTable('#headers-table')) {
             $('#headers-table').DataTable().destroy();
         }
+        
+        // Clear the global references
+        window.domainTable = null;
+        window.headersTable = null;
         
         // Clear all previous results and reset displays
         document.getElementById('domain-results').innerHTML = '';
@@ -122,23 +126,23 @@ window.addEventListener('load', function() {
         }
     };
 
-    // Initialize global variables
+    // 2. Attach handler immediately
+    searchForm.addEventListener('submit', handleSubmit);
+
+    // 3. Then initialize globals
     window.domainResults = [];
     window.certResults = [];
     window.headerResults = [];
     window.headersPagination = { currentPage: 1, perPage: 10 };
     window.currentTimeline = null;
 
-    // Check for cached results
+    // 4. Finally check cache
     const cached = loadResults();
     if (cached) {
         urlInput.value = cached.url;
         document.querySelector(`input[name="searchType"][value="${cached.searchType}"]`).checked = true;
         displayResults(cached.data, cached.searchType);
     }
-
-    // Attach submit handler
-    searchForm.addEventListener('submit', handleSubmit);
 
     function displayResults(data, searchType) {
         // Create timeline and update checkboxes

@@ -66,7 +66,13 @@ function createTimeline(data) {
     const container = document.getElementById('visualization');
     const timelineContainer = document.getElementById('timeline');
     
-    timelineItems.clear();
+    // Clear and recreate DataSet to prevent memory leaks
+    if (timelineItems) {
+        timelineItems.clear();
+        timelineItems = null;
+    }
+    timelineItems = new DataSet();
+    
     let items = [];
     let hasData = false;
     
@@ -125,18 +131,20 @@ function createTimeline(data) {
             debugLog('Processing cert item:', item);
             let date = null;
             
-            // Direct handling for certificate date format "DD-MM-YYYY"
+            // Support both "DD-MM-YYYY" and "DD-MM-YYYY HH:MM:SS UTC" formats
             const dateStr = item['First Seen'];
-            const dateRegex = /^(\d{2})-(\d{2})-(\d{4})$/;
+            const dateRegex = /^(\d{2})-(\d{2})-(\d{4})(?:\s(\d{2}):(\d{2}):(\d{2})\s+UTC)?$/;
             const match = dateStr.match(dateRegex);
             
             if (match) {
-                const [_, day, month, year] = match;
+                const [_, day, month, year, hours, minutes, seconds] = match;
                 date = new Date(Date.UTC(
                     parseInt(year, 10),
                     parseInt(month, 10) - 1,
                     parseInt(day, 10),
-                    0, 0, 0 // Use midnight UTC
+                    hours ? parseInt(hours, 10) : 0,
+                    minutes ? parseInt(minutes, 10) : 0,
+                    seconds ? parseInt(seconds, 10) : 0
                 ));
                 debugLog('Parsed certificate date with UTC preservation:', date);
             }
@@ -165,9 +173,9 @@ function createTimeline(data) {
             debugLog('Processing headers item:', item);
             let date = null;
             
-            // Direct handling for headers date format "DD-MM-YYYY HH:MM:SS"
+            // Support "DD-MM-YYYY HH:MM:SS UTC" or "DD-MM-YYYY HH:MM:SS Z" formats
             const dateStr = item.last_modified;
-            const dateRegex = /^(\d{2})-(\d{2})-(\d{4})\s(\d{2}):(\d{2}):(\d{2})(?:\s+([A-Z]+))?$/;
+            const dateRegex = /^(\d{2})-(\d{2})-(\d{4})\s(\d{2}):(\d{2}):(\d{2})(?:\s+(UTC|Z))?$/;
             const match = dateStr.match(dateRegex);
             
             if (match) {
