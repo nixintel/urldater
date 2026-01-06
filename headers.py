@@ -361,6 +361,15 @@ def get_media_dates_with_cdp(driver, url):
         logger.info(f"{prefix} CDP method found {len(media_responses)} media items with last-modified headers")
         return media_responses
         
+    except TimeoutException as e:
+        # Specific handling for timeout errors
+        error_msg = str(e)
+        logger.error(f"{prefix} Page load timeout: {error_msg}")
+        return [{
+            'type': 'Info',
+            'error': 'Page Load Timeout',
+            'message': 'The page took too long to load or was too resource-intensive. This can happen with very large or complex pages. The page may still be accessible, but we were unable to retrieve header information within the timeout period. Try again later or use a different analysis method.'
+        }]
     except Exception as e:
         logger.error(f"{prefix} Error in CDP method: {str(e)}")
         return []
