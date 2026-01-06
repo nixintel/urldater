@@ -5,6 +5,8 @@ import logging
 import threading
 from queue import Queue, Empty
 import time
+import psutil
+import gc
 
 class WebDriverPool:
     _instance = None
@@ -109,11 +111,18 @@ class WebDriverPool:
                         except Empty:
                             raise TimeoutError("Memory usage too high and no drivers available")
                     
-                    self.current_drivers += 1
-                    logging.debug(f"Creating new WebDriver (total: {self.current_drivers})")
-                    driver = self._create_driver()
-                    self.driver_timeouts[id(driver)] = time.time()
-                    return driver
+                    # Try to create driver first, only increment counter on success
+                    try:
+                        logging.debug(f"Attempting to create new WebDriver")
+                        driver = self._create_driver()
+                        # Only increment counter after successful creation
+                        self.current_drivers += 1
+                        logging.debug(f"Successfully created WebDriver (total: {self.current_drivers})")
+                        self.driver_timeouts[id(driver)] = time.time()
+                        return driver
+                    except Exception as e:
+                        logging.error(f"Failed to create driver: {e}")
+                        raise TimeoutError(f"Unable to create WebDriver: {str(e)}")
                 else:
                     # If at max drivers, wait for one to become available
                     try:
@@ -173,7 +182,6 @@ class WebDriverPool:
     
     def _get_memory_usage(self):
         """Get current memory usage of the process"""
-        import psutil
         process = psutil.Process()
         return process.memory_info().rss / 1024 / 1024  # Convert to MB
 
@@ -188,7 +196,6 @@ class WebDriverPool:
         if driver:
             try:
                 # Force garbage collection before cleanup
-                import gc
                 gc.collect()
                 
                 # Quit the driver

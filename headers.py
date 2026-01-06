@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 import logging
 from urllib.parse import urlparse
 import time
+import random
 
 # Configure module logger
 logger = logging.getLogger(__name__)
@@ -118,70 +119,88 @@ async def get_media_dates_fallback(url):
             'message': 'Failed to fetch the page'
         }]
 
-async def get_last_modified(session, url):
-    try:
-        async with session.head(url, allow_redirects=True) as response:
-            # Check response status
-            if 400 <= response.status < 500:
-                # Client errors (4xx) - no retry needed
-                error_msg = {
-                    400: 'Bad Request',
-                    401: 'Unauthorized',
-                    403: 'Forbidden',
-                    404: 'Not Found',
-                }.get(response.status, f'Client Error {response.status}')
-                logging.error(f"{error_msg} for {url}")
-                return {'error': error_msg, 'status_code': response.status, 'no_retry': True}
-            elif response.status >= 500:
-                # Server errors (5xx) - can be retried
-                logging.error(f"Server error {response.status} for {url}")
-                return {'error': f'Server Error {response.status}', 'status_code': response.status, 'no_retry': False}
+async def get_last_modified(session, url, max_retries=3):
+    """Get last-modified header with exponential backoff retry"""
+    for attempt in range(max_retries):
+        try:
+            async with session.head(url, allow_redirects=True) as response:
+                # Check response status
+                if 400 <= response.status < 500:
+                    # Client errors (4xx) - no retry needed
+                    error_msg = {
+                        400: 'Bad Request',
+                        401: 'Unauthorized',
+                        403: 'Forbidden',
+                        404: 'Not Found',
+                    }.get(response.status, f'Client Error {response.status}')
+                    logging.error(f"{error_msg} for {url}")
+                    return {'error': error_msg, 'status_code': response.status, 'no_retry': True}
+                elif response.status >= 500:
+                    # Server errors (5xx) - can be retried
+                    if attempt < max_retries - 1:
+                        backoff = 2 ** attempt
+                        logging.warning(f"Server error {response.status} for {url}, retrying in {backoff}s (attempt {attempt + 1}/{max_retries})")
+                        await asyncio.sleep(backoff)
+                        continue
+                    else:
+                        logging.error(f"Server error {response.status} for {url} after {max_retries} attempts")
+                        return {'error': f'Server Error {response.status}', 'status_code': response.status, 'no_retry': False}
                 
-            # Validate content type if present
-            content_type = response.headers.get('Content-Type', '')
-            if content_type and 'text/html' in content_type.lower():
-                logging.warning(f"Unexpected HTML response for {url}")
-                return None
-                
-            # Check various possible header names, don't always seem to be standard. 
-            last_modified = (
-                response.headers.get('last-modified') or
-                response.headers.get('Last-Modified') or
-                response.headers.get('x-last-modified') or
-                response.headers.get('X-Last-Modified')
-            )
-            
-            if last_modified:
-                try:
-                    dt = datetime.strptime(last_modified, '%a, %d %b %Y %H:%M:%S GMT')
-                    dt = dt.replace(tzinfo=timezone.utc)
-                    return dt
-                except ValueError:
-                    logging.warning(f"Invalid date format in header for {url}: {last_modified}")
+                # Validate content type if present
+                content_type = response.headers.get('Content-Type', '')
+                if content_type and 'text/html' in content_type.lower():
+                    logging.warning(f"Unexpected HTML response for {url}")
                     return None
-            else:
-                # If HEAD request doesn't work, try GET
-                async with session.get(url, allow_redirects=True) as get_response:
-                    last_modified = (
-                        get_response.headers.get('last-modified') or
-                        get_response.headers.get('Last-Modified') or
-                        get_response.headers.get('x-last-modified') or
-                        get_response.headers.get('X-Last-Modified')
-                    )
-                    if last_modified:
-                        try:
-                            dt = datetime.strptime(last_modified, '%a, %d %b %Y %H:%M:%S GMT')
-                            dt = dt.replace(tzinfo=timezone.utc)
-                            return dt
-                        except ValueError:
-                            logging.warning(f"Invalid date format in header for {url}: {last_modified}")
-                            return None
                     
-                    logging.info(f"No last-modified header found for {url}. Headers: {dict(get_response.headers)}")
-                    return None
-    except Exception as e:
-        logging.error(f"Error fetching last-modified for {url}: {str(e)}")
-        return None
+                # Check various possible header names, don't always seem to be standard. 
+                last_modified = (
+                    response.headers.get('last-modified') or
+                    response.headers.get('Last-Modified') or
+                    response.headers.get('x-last-modified') or
+                    response.headers.get('X-Last-Modified')
+                )
+                
+                if last_modified:
+                    try:
+                        dt = datetime.strptime(last_modified, '%a, %d %b %Y %H:%M:%S GMT')
+                        dt = dt.replace(tzinfo=timezone.utc)
+                        return dt
+                    except ValueError:
+                        logging.warning(f"Invalid date format in header for {url}: {last_modified}")
+                        return None
+                else:
+                    # If HEAD request doesn't work, try GET
+                    async with session.get(url, allow_redirects=True) as get_response:
+                        last_modified = (
+                            get_response.headers.get('last-modified') or
+                            get_response.headers.get('Last-Modified') or
+                            get_response.headers.get('x-last-modified') or
+                            get_response.headers.get('X-Last-Modified')
+                        )
+                        if last_modified:
+                            try:
+                                dt = datetime.strptime(last_modified, '%a, %d %b %Y %H:%M:%S GMT')
+                                dt = dt.replace(tzinfo=timezone.utc)
+                                return dt
+                            except ValueError:
+                                logging.warning(f"Invalid date format in header for {url}: {last_modified}")
+                                return None
+                        
+                        logging.info(f"No last-modified header found for {url}. Headers: {dict(get_response.headers)}")
+                        return None
+        
+        except aiohttp.ClientError as e:
+            if attempt < max_retries - 1:
+                backoff = 2 ** attempt
+                logging.warning(f"Connection error for {url}, retrying in {backoff}s (attempt {attempt + 1}/{max_retries}): {str(e)}")
+                await asyncio.sleep(backoff)
+                continue
+            else:
+                logging.error(f"Error fetching last-modified for {url} after {max_retries} attempts: {str(e)}")
+                return None
+    
+    # Should not reach here, but return None as fallback
+    return None
 
 def get_element_with_retry(driver, by, value, max_retries=3, timeout=10):
     """Helper function to get elements with retry logic for stale elements"""
@@ -348,11 +367,16 @@ async def get_media_dates(url):
         async with aiohttp.ClientSession() as session:
             tasks = {}  # Dictionary to map tasks to their URLs
             
-            for media_url in filtered_media:
+            for i, media_url in enumerate(filtered_media):
                 # Skip data URLs
                 if media_url.startswith('data:'):
                     logging.debug(f"Skipping data URL: {media_url}")
                     continue
+                
+                # Add staggered delay to avoid rate limiting
+                if i > 0:  # Don't delay the first request
+                    import random
+                    await asyncio.sleep(random.uniform(0.1, 0.3))
                     
                 task = asyncio.create_task(get_last_modified(session, media_url))
                 tasks[task] = media_url
