@@ -273,13 +273,38 @@ def get_media_dates_with_cdp(driver, url):
     logger.info(f"{prefix} Starting CDP-based retrieval for URL: {url}")
     
     try:
+        # Hypothesis A,B,C,D: Log driver state and system resources at entry
+        import os
+        page_load_strategy = driver.capabilities.get('pageLoadStrategy', 'unknown')
+        mem_available_mb = 0
+        try:
+            if hasattr(os, 'sysconf'):
+                mem_available_mb = os.sysconf('SC_PAGE_SIZE') * os.sysconf('SC_AVPHYS_PAGES') / 1024 / 1024
+        except:
+            pass
+        logger.info(f"{prefix} [DEBUG-H:A,B,C,D] CDP entry - driver_session={driver.session_id}, page_load_strategy={page_load_strategy}, memory_available_mb={mem_available_mb:.2f}")
+        
         # Clear any existing logs
         driver.get_log('performance')
+        
+        # Hypothesis B,C: Log state before navigation
+        current_url_before = driver.current_url
+        logger.info(f"{prefix} [DEBUG-H:B,C] Before driver.get() - url={url}, timeout_set=10s, current_url={current_url_before}, session_valid=True")
         
         # Navigate to the page with shorter timeout
         logger.info(f"{prefix} Navigating to: {url}")
         driver.set_page_load_timeout(10)  # Reduced from 15
+        
+        # Track navigation timing
+        import time
+        nav_start = time.time()
+        
         driver.get(url)
+        
+        # Hypothesis B,C: Log successful navigation with timing
+        nav_duration = time.time() - nav_start
+        page_title = driver.title[:100] if driver.title else ""
+        logger.info(f"{prefix} [DEBUG-H:B,C] After driver.get() SUCCESS - nav_duration_sec={nav_duration:.3f}, current_url={driver.current_url}, page_title={page_title}")
         
         # Wait for page to load (interactive or complete)
         try:
@@ -362,6 +387,17 @@ def get_media_dates_with_cdp(driver, url):
         return media_responses
         
     except Exception as e:
+        # Hypothesis A,B,C,D,E: Log detailed exception info with timing
+        import traceback
+        import time
+        nav_duration = time.time() - nav_start if 'nav_start' in locals() else -1
+        error_type = type(e).__name__
+        error_msg = str(e)[:500]
+        driver_alive = hasattr(driver, 'session_id') if 'driver' in locals() else False
+        traceback_str = traceback.format_exc()[:1000]
+        
+        logger.error(f"{prefix} [DEBUG-H:A,B,C,D,E] CDP EXCEPTION - error_type={error_type}, error_msg={error_msg}, nav_duration_sec={nav_duration:.3f}, driver_alive={driver_alive}")
+        logger.error(f"{prefix} [DEBUG-H:A,B,C,D,E] CDP EXCEPTION traceback: {traceback_str}")
         logger.error(f"{prefix} Error in CDP method: {str(e)}")
         return []
 
@@ -384,16 +420,31 @@ async def get_media_dates(url):
             session_id = driver.session_id
             logging.info(f"{prefix} Got WebDriver with session ID: {session_id}")
             
+            # Hypothesis D: Log driver state before CDP call
+            driver_name = driver.name
+            driver_current_url = driver.current_url
+            logging.info(f"{prefix} [DEBUG-H:D] Before CDP call - session_id={session_id}, driver_name={driver_name}, driver_current_url={driver_current_url}")
+            
             # Try CDP method
             cdp_results = get_media_dates_with_cdp(driver, url)
             # CDP succeeded - return results (even if empty)
             logging.info(f"{prefix} CDP method completed, found {len(cdp_results)} results")
+            
+            # Hypothesis D: Log results info
+            results_empty = len(cdp_results) == 0
+            returning_info_msg = not cdp_results
+            logging.info(f"{prefix} [DEBUG-H:D] After CDP call - cdp_results_count={len(cdp_results)}, results_empty={results_empty}, returning_info_msg={returning_info_msg}")
+            
             headers_driver_pool.return_driver(driver)
             return cdp_results if cdp_results else [{
                 'type': 'Info',
                 'error': 'No media files with last-modified headers found'
             }]
     except Exception as e:
+        # Hypothesis D: Log outer exception
+        error_type = type(e).__name__
+        error_msg = str(e)[:500]
+        logging.warning(f"{prefix} [DEBUG-H:D] CDP outer exception - error_type={error_type}, error_msg={error_msg}")
         logging.warning(f"{prefix} CDP method failed: {str(e)}")
         if driver:
             headers_driver_pool.return_driver(driver)
