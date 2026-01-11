@@ -330,11 +330,70 @@ def get_media_dates_with_cdp(driver, url):
         media_responses = []
         processed_urls = set()  # Avoid duplicates
         
+        # Build a dictionary of media items and their intended types (for redirect tracking)
+        media_dict = {}
+        
+        # Get favicon URLs from the page
+        try:
+            favicon_selectors = [
+                "link[rel='icon']",
+                "link[rel='shortcut icon']",
+                "link[rel='apple-touch-icon']",
+                "link[rel*='icon']"
+            ]
+            
+            favicon_found = False
+            for selector in favicon_selectors:
+                try:
+                    favicon_elements = driver.find_elements(By.CSS_SELECTOR, selector)
+                    for favicon in favicon_elements:
+                        try:
+                            favicon_url = favicon.get_attribute('href')
+                            if favicon_url and not favicon_url.startswith('data:'):
+                                media_dict[favicon_url] = 'favicon'
+                                logger.info(f"{prefix} Found favicon in HTML: {favicon_url}")
+                                favicon_found = True
+                        except Exception as e:
+                            logger.debug(f"{prefix} Error getting favicon href: {str(e)}")
+                except Exception as e:
+                    logger.debug(f"{prefix} Error with selector {selector}: {str(e)}")
+            
+            # Add default favicon path if none found
+            if not favicon_found:
+                from urllib.parse import urlparse
+                default_favicon = f"{urlparse(url).scheme}://{urlparse(url).netloc}/favicon.ico"
+                media_dict[default_favicon] = 'favicon'
+                logger.info(f"{prefix} Added default favicon location: {default_favicon}")
+        except Exception as e:
+            logger.warning(f"{prefix} Error building favicon dictionary: {str(e)}")
+        
         # Limit the number of logs processed to prevent memory issues
         max_logs = 2000
         logs_to_process = logs[:max_logs] if len(logs) > max_logs else logs
         logger.info(f"{prefix} Will process {len(logs_to_process)} of {len(logs)} log entries")
         
+        # Track request ID to original URL mapping for redirect handling
+        request_id_to_original_url = {}
+        
+        # First pass: map request IDs to original URLs
+        for log in logs_to_process:
+            try:
+                message = json.loads(log['message'])
+                method = message['message'].get('method')
+                
+                if method == 'Network.requestWillBeSent':
+                    params = message['message']['params']
+                    request_id = params['requestId']
+                    request_url = params['request']['url']
+                    # Store the original request URL (first request for this ID)
+                    if request_id not in request_id_to_original_url:
+                        request_id_to_original_url[request_id] = request_url
+            except (json.JSONDecodeError, KeyError):
+                continue
+        
+        logger.info(f"{prefix} Tracked {len(request_id_to_original_url)} request IDs for redirect handling")
+        
+        # Second pass: process responses
         for log in logs_to_process:
             try:
                 message = json.loads(log['message'])
@@ -344,6 +403,7 @@ def get_media_dates_with_cdp(driver, url):
                     params = message['message']['params']
                     response = params['response']
                     response_url = response['url']
+                    request_id = params['requestId']
                     
                     # Check if this is a media URL
                     if is_media_url(response_url) and response_url not in processed_urls:
@@ -364,7 +424,17 @@ def get_media_dates_with_cdp(driver, url):
                                 dt = datetime.strptime(last_modified, '%a, %d %b %Y %H:%M:%S GMT')
                                 dt = dt.replace(tzinfo=timezone.utc)
                                 
-                                media_type = get_media_type(response_url)
+                                # Determine media type: check if original request was for a favicon
+                                original_url = request_id_to_original_url.get(request_id, response_url)
+                                
+                                # Preserve 'favicon' type if the original URL was marked as such
+                                if original_url in media_dict and media_dict[original_url] == 'favicon':
+                                    media_type = 'favicon'
+                                    if original_url != response_url:
+                                        logger.info(f"{prefix} Preserving 'favicon' type through redirect: {original_url} -> {response_url}")
+                                else:
+                                    # Otherwise determine by file extension of final URL
+                                    media_type = get_media_type(response_url)
                                 
                                 media_responses.append({
                                     'type': media_type,
@@ -379,7 +449,12 @@ def get_media_dates_with_cdp(driver, url):
                                 logger.warning(f"{prefix} Invalid date format for {response_url}: {last_modified} - {e}")
                         else:
                             # Log images that were detected but don't have last-modified header
-                            media_type = get_media_type(response_url)
+                            # Check if original request was for a favicon
+                            original_url = request_id_to_original_url.get(request_id, response_url)
+                            if original_url in media_dict and media_dict[original_url] == 'favicon':
+                                media_type = 'favicon'
+                            else:
+                                media_type = get_media_type(response_url)
                             logger.info(f"{prefix} Found {media_type} WITHOUT last-modified header: {response_url}")
                             
             except (json.JSONDecodeError, KeyError) as e:
