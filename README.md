@@ -2,7 +2,9 @@
 
 URL Dater is a utility designed to help researchers by providing reliable sources of information about the age of a website and its content. 
 
-It does this by gathering information about the domain's registration date via RDAP, SSL certificate history, and the Last-Modified header timestamp of images embedded in the websites. It combines multiple techniques to provide a comprehensive view of a website's history and content and provides a timeline of a website's history.
+It does this by gathering information about the domain's registration date via RDAP, SSL certificate history, and the Last-Modified header timestamp of images embedded in the websites. It combines multiple techniques to provide a comprehensive view of a website's history and content and provides a timeline of a website's history. 
+
+I wrote about the concepts in more detail in [this blog article.](https://nixintel.info/osint-tools/calculating-website-age-tracking-changes-with-url-dater/)
 
 It is possible to run each module individually or all three at once.
 
