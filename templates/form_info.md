@@ -8,8 +8,8 @@ URL Dater helps you determine when a webpage or website was first created. It al
 
 Select your preferred analysis method using the radio buttons above. For most comprehensive results, leave **"All Analysis Types"** selected.
 
-For more information please read the [FAQ](/faq) or read my original blog post with some case studies that explains this in more detail.
+For more information please read the [FAQ](/faq) or read my [original blog post](https://nixintel.info/osint-tools/calculating-website-age-tracking-changes-with-url-dater/) that explains the URLDater in more detail.
 
-You can download and host this utility yourself from the [URLDater GitHub](https://github.com/nixintel/urldater)
+You can download and host this utility yourself from the [URLDater GitHub](https://github.com/nixintel/urldater). I highly recommend this for improved performance.
 
 
