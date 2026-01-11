@@ -12,22 +12,30 @@ export { createTimeline };
 document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('showRdap').addEventListener('change', updateTimelineVisibility);
     document.getElementById('showCerts').addEventListener('change', updateTimelineVisibility);
-    document.getElementById('showHeaders').addEventListener('change', updateTimelineVisibility);
+    document.getElementById('showFavicons').addEventListener('change', updateTimelineVisibility);
+    document.getElementById('showImages').addEventListener('change', updateTimelineVisibility);
 });
 function updateTimelineFilterVisibility(data) {
     const rdapCheckbox = document.getElementById('showRdap');
     const certsCheckbox = document.getElementById('showCerts');
-    const headersCheckbox = document.getElementById('showHeaders');
+    const faviconsCheckbox = document.getElementById('showFavicons');
+    const imagesCheckbox = document.getElementById('showImages');
     
     // Hide all checkboxes by default
     rdapCheckbox.parentElement.style.display = 'none';
     certsCheckbox.parentElement.style.display = 'none';
-    headersCheckbox.parentElement.style.display = 'none';
+    faviconsCheckbox.parentElement.style.display = 'none';
+    imagesCheckbox.parentElement.style.display = 'none';
     
     // Uncheck all checkboxes
     rdapCheckbox.checked = false;
     certsCheckbox.checked = false;
-    headersCheckbox.checked = false;
+    faviconsCheckbox.checked = false;
+    imagesCheckbox.checked = false;
+    
+    // Track which types we have in headers
+    let hasFavicons = false;
+    let hasImages = false;
     
     // Show and check only relevant checkboxes based on data
     if (data.rdap && data.rdap.length > 0) {
@@ -39,8 +47,20 @@ function updateTimelineFilterVisibility(data) {
         certsCheckbox.checked = true;
     }
     if (data.headers && data.headers.length > 0) {
-        headersCheckbox.parentElement.style.display = 'block';
-        headersCheckbox.checked = true;
+        // Check what types of headers we have
+        data.headers.forEach(item => {
+            if (item.type === 'favicon') hasFavicons = true;
+            if (item.type === 'image') hasImages = true;
+        });
+        
+        if (hasFavicons) {
+            faviconsCheckbox.parentElement.style.display = 'block';
+            faviconsCheckbox.checked = true;
+        }
+        if (hasImages) {
+            imagesCheckbox.parentElement.style.display = 'block';
+            imagesCheckbox.checked = true;
+        }
     }
     
     // For single module results (when data is an array)
@@ -52,9 +72,12 @@ function updateTimelineFilterVisibility(data) {
             } else if (data[0].type === 'Registered' || data[0].type === 'Updated') {
                 rdapCheckbox.parentElement.style.display = 'block';
                 rdapCheckbox.checked = true;
-            } else if (data[0].type === 'favicon' || data[0].type === 'image') {
-                headersCheckbox.parentElement.style.display = 'block';
-                headersCheckbox.checked = true;
+            } else if (data[0].type === 'favicon') {
+                faviconsCheckbox.parentElement.style.display = 'block';
+                faviconsCheckbox.checked = true;
+            } else if (data[0].type === 'image') {
+                imagesCheckbox.parentElement.style.display = 'block';
+                imagesCheckbox.checked = true;
             }
         }
     }
@@ -198,7 +221,7 @@ function createTimeline(data) {
                     content: item.type === 'favicon' ? 'Favicon last modified' : 'Image last modified',
                     start: date,
                     className: item.type === 'favicon' ? 'timeline-favicon' : 'timeline-header',
-                    group: 'headers',
+                    group: item.type === 'favicon' ? 'favicon' : 'image',
                     title: `${item.type}<br>${item.last_modified}<br>${item.url}`
                 });
                 debugLog('Added headers event to timeline with date:', date);
@@ -363,14 +386,16 @@ function createTimeline(data) {
 function updateTimelineVisibility() {
     const showRdap = document.getElementById('showRdap').checked;
     const showCerts = document.getElementById('showCerts').checked;
-    const showHeaders = document.getElementById('showHeaders').checked;
+    const showFavicons = document.getElementById('showFavicons').checked;
+    const showImages = document.getElementById('showImages').checked;
     
     let visibleItems = [];
     
     timelineItems.forEach(item => {
         if ((item.group === 'rdap' && showRdap) ||
             (item.group === 'certs' && showCerts) ||
-            (item.group === 'headers' && showHeaders)) {
+            (item.group === 'favicon' && showFavicons) ||
+            (item.group === 'image' && showImages)) {
             visibleItems.push(item);
         }
     });

@@ -367,6 +367,27 @@ def get_media_dates_with_cdp(driver, url):
         except Exception as e:
             logger.warning(f"{prefix} Error building favicon dictionary: {str(e)}")
         
+        # Actively request favicon URLs to ensure they appear in CDP logs
+        if media_dict:
+            logger.info(f"{prefix} Actively requesting {len(media_dict)} media URLs to ensure they're captured")
+            for media_url, media_type in media_dict.items():
+                if media_type == 'favicon':
+                    try:
+                        # Use JavaScript to request the favicon, triggering a network request
+                        script = f"""
+                        (function() {{
+                            var img = new Image();
+                            img.src = "{media_url}";
+                        }})();
+                        """
+                        driver.execute_script(script)
+                        logger.info(f"{prefix} Triggered request for favicon: {media_url}")
+                    except Exception as e:
+                        logger.warning(f"{prefix} Failed to trigger request for {media_url}: {str(e)}")
+            
+            # Give the browser a moment to initiate these requests
+            time.sleep(0.5)
+        
         # Limit the number of logs processed to prevent memory issues
         max_logs = 2000
         logs_to_process = logs[:max_logs] if len(logs) > max_logs else logs
