@@ -97,7 +97,7 @@ async def get_media_dates_fallback(url):
                         last_modified = await get_last_modified(session, media_url)
                         if last_modified and isinstance(last_modified, datetime):
                             results.append({
-                                'type': 'image' if any(ext in media_url.lower() for ext in ['.jpg', '.jpeg', '.png', '.gif']) else 'favicon',
+                                'type': get_media_type(media_url),
                                 'url': media_url,
                                 'last_modified': format_datetime(last_modified)
                             })
@@ -260,9 +260,9 @@ def get_media_type(url):
         return 'unknown'
     
     url_lower = url.lower()
-    if any(ext in url_lower for ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.tif', '.tiff', '.heif']):
+    if any(ext in url_lower for ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.tif', '.tiff', '.heif', '.svg']):
         return 'image'
-    elif any(ext in url_lower for ext in ['.ico', '.svg']):
+    elif any(ext in url_lower for ext in ['.ico']):
         return 'favicon'
     else:
         return 'media'
@@ -331,8 +331,9 @@ def get_media_dates_with_cdp(driver, url):
         processed_urls = set()  # Avoid duplicates
         
         # Limit the number of logs processed to prevent memory issues
-        max_logs = 1000
+        max_logs = 2000
         logs_to_process = logs[:max_logs] if len(logs) > max_logs else logs
+        logger.info(f"{prefix} Will process {len(logs_to_process)} of {len(logs)} log entries")
         
         for log in logs_to_process:
             try:
@@ -377,7 +378,9 @@ def get_media_dates_with_cdp(driver, url):
                             except ValueError as e:
                                 logger.warning(f"{prefix} Invalid date format for {response_url}: {last_modified} - {e}")
                         else:
-                            logger.debug(f"{prefix} No last-modified header for {response_url}")
+                            # Log images that were detected but don't have last-modified header
+                            media_type = get_media_type(response_url)
+                            logger.info(f"{prefix} Found {media_type} WITHOUT last-modified header: {response_url}")
                             
             except (json.JSONDecodeError, KeyError) as e:
                 logger.debug(f"{prefix} Error parsing log entry: {e}")
